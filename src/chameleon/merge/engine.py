@@ -54,15 +54,30 @@ def _resolve_parent(root: BaseModel, segments: tuple[str, ...]) -> BaseModel:
     return node
 
 
-def _read_leaf(root: BaseModel, segments: tuple[str, ...], target_key: TargetId | None) -> object:
-    """Read a leaf value (optionally indexed into a ``dict[TargetId, V]``)."""
+def _read_leaf(
+    root: BaseModel,
+    segments: tuple[str, ...],
+    target_key: TargetId | None,
+    dict_key: str | None = None,
+) -> object:
+    """Read a leaf value, optionally indexed by ``target_key`` or ``dict_key``.
+
+    ``target_key`` indexes into a ``dict[TargetId, V]``; ``dict_key`` indexes
+    into a ``dict[str, V]`` (issue #44 — see ``merge/changeset.py`` module
+    docstring). The two are mutually exclusive — the walker emits exactly
+    one of them per record.
+    """
     parent = _resolve_parent(root, segments)
     leaf = getattr(parent, segments[-1])
-    if target_key is None:
-        return leaf
-    if not isinstance(leaf, dict):
-        return None
-    return leaf.get(target_key)
+    if target_key is not None:
+        if not isinstance(leaf, dict):
+            return None
+        return leaf.get(target_key)
+    if dict_key is not None:
+        if not isinstance(leaf, dict):
+            return None
+        return leaf.get(dict_key)
+    return leaf
 
 
 def _write_leaf(
@@ -70,28 +85,49 @@ def _write_leaf(
     segments: tuple[str, ...],
     target_key: TargetId | None,
     value: object,
+    dict_key: str | None = None,
 ) -> None:
-    """Write ``value`` at the leaf, preserving ``dict[TargetId, V]`` semantics.
+    """Write ``value`` at the leaf, preserving keyed-dict siblings.
 
     For target-keyed leaves we mutate (or initialize) the inner dict so
-    other ``TargetId`` keys present on ``composed`` are preserved.
+    other ``TargetId`` keys present on ``composed`` are preserved. The
+    same rule applies to ``dict_key`` (issue #44): we mutate just that
+    str-keyed entry, leaving sibling keys untouched.
     """
     parent = _resolve_parent(root, segments)
     leaf_name = segments[-1]
-    if target_key is None:
+    if target_key is None and dict_key is None:
         setattr(parent, leaf_name, value)
         return
 
     current = getattr(parent, leaf_name)
     if not isinstance(current, dict):
         current = {}
+    # Mutually exclusive by walker contract: exactly one of target_key /
+    # dict_key is set when this branch runs. The narrowing here proves it
+    # to the type checker without a leaking type-ignore comment.
+    key: TargetId | str
+    if target_key is not None:
+        key = target_key
+    else:
+        assert dict_key is not None, "_write_leaf called without target_key or dict_key"
+        key = dict_key
     if value is None:
         # Resolver returned no value for this key — drop it rather than
         # writing None, which would break round-trip equality.
-        current.pop(target_key, None)
+        current.pop(key, None)
     else:
-        current[target_key] = value
-    setattr(parent, leaf_name, current or None)
+        current[key] = value
+    # ``dict[TargetId, V]`` is typed ``dict | None`` on most schemas
+    # (e.g. ``identity.model``); collapse to ``None`` when empty so the
+    # field's nullability invariant holds. ``dict[str, V]`` schema fields
+    # default to ``{}`` (e.g. ``capabilities.plugins``); keep the empty
+    # dict rather than ``None`` for those, otherwise Pydantic validation
+    # rejects the model on the next deep-copy or model_validate.
+    if not current and target_key is not None:
+        setattr(parent, leaf_name, None)
+    else:
+        setattr(parent, leaf_name, current)
 
 
 class MergeRequest(BaseModel):
@@ -156,8 +192,22 @@ class MergeEngine:
 
     def merge(self, request: MergeRequest) -> MergeResult:  # noqa: PLR0912, PLR0915
         # 1. Load N1 and N0
+        #
+        # We load the raw YAML view alongside the validated model so the
+        # walker can honour the "operator omission ≠ explicit deletion"
+        # rule (issue #44 — see merge/changeset.py module docstring):
+        # Pydantic's ``model_validate`` collapses missing fields and
+        # explicit defaults into identical defaulted values, so the
+        # walker needs the raw dict to tell them apart.
+        n1_raw: dict[str, object] | None = None
         if self.paths.neutral.exists():
-            n1 = Neutral.model_validate(load_yaml(self.paths.neutral))
+            raw = load_yaml(self.paths.neutral)
+            n1 = Neutral.model_validate(raw)
+            if isinstance(raw, dict):
+                # ruamel returns CommentedMap (a dict subclass) — coerce
+                # to a plain ``dict[str, object]`` so the typed
+                # ``walk_changes`` parameter accepts it.
+                n1_raw = {str(k): v for k, v in raw.items()}
         else:
             n1 = Neutral(schema_version=1)
 
@@ -194,21 +244,81 @@ class MergeEngine:
         # 3-5. Classify per FieldPath (P2-1) and gather conflicts.
         #
         # `walk_changes` produces one ChangeRecord per leaf path, with a
-        # special-case for `dict[TargetId, V]` fields (one record per
-        # TargetId key, scoped to that target's own evidence). We apply
-        # consensual outcomes by writing the chosen leaf value into
-        # `composed`, preserving sibling keys on target-keyed dicts.
+        # special-case for `dict[TargetId, V]` and `dict[str, V]` fields
+        # (one record per dict key, scoped to that key's evidence). We
+        # apply consensual outcomes by writing the chosen leaf value
+        # into `composed`, preserving sibling keys on keyed dicts.
+        #
+        # Per-target preservation overlay (issue #44)
+        # -------------------------------------------
+        # When the operator didn't author a path AND the per-key
+        # classifier finds a CONFLICT (two targets enumerate the same
+        # key with different values — common for cross-target codecs
+        # that normalize the same source differently, e.g.
+        # ``capabilities.plugin_marketplaces`` where Claude renders a
+        # GitHub repo as ``kind=github`` and Codex renders the same
+        # repo as ``kind=git, url=...``), the engine MUST NOT promote
+        # one target's value as the canonical neutral form, but it MUST
+        # preserve each target's own value on its own re-derived file.
+        # ``per_target_overlay[tid]`` accumulates those per-target leaf
+        # values; the re-derive loop layers them on top of ``composed``
+        # before invoking each target's codec stack.
         merge_id = transaction_id()
         conflicts: list[Conflict] = []
         composed = n1.model_copy(deep=True)
+        per_target_overlay: dict[TargetId, Neutral] = {
+            tid: composed.model_copy(deep=True) for tid in per_target_neutral
+        }
 
-        records = walk_changes(n0, n1, per_target_neutral)
+        records = walk_changes(n0, n1, per_target_neutral, n1_authored=n1_raw)
         for rec in records:
             cl = classify_change(rec)
             if cl.outcome is ChangeOutcome.UNCHANGED:
+                # Operator-omission rule (issue #44): if the operator
+                # didn't author this leaf in raw YAML, ``composed`` —
+                # which is seeded from N₁ — is missing the value the
+                # walker substituted (n0). Write n0's in-Python value so
+                # composed reflects the unchanged-from-LKG state. This
+                # is a no-op for authored leaves (they already match in
+                # composed via the n1 deep-copy).
+                if not rec.authored:
+                    n0_leaf = _read_leaf(n0, rec.path.segments, rec.target_key, rec.dict_key)
+                    _write_leaf(
+                        composed,
+                        rec.path.segments,
+                        rec.target_key,
+                        n0_leaf,
+                        rec.dict_key,
+                    )
+                    for overlay in per_target_overlay.values():
+                        _write_leaf(
+                            overlay,
+                            rec.path.segments,
+                            rec.target_key,
+                            n0_leaf,
+                            rec.dict_key,
+                        )
                 continue
             if cl.outcome is ChangeOutcome.CONFLICT:
                 conflicts.append(Conflict(record=rec))
+                # Per-target preservation: when neither N₀ nor N₁ has an
+                # opinion on this key (both empty / unauthored) but two
+                # or more targets disagree, write each target's own value
+                # into its overlay so re-derive emits what each target
+                # already had on disk. Without this, KEEP wipes both
+                # targets' independent state on every init/merge cycle.
+                if not rec.authored:
+                    for tid_pt, tn in per_target_neutral.items():
+                        leaf_pt = _read_leaf(tn, rec.path.segments, rec.target_key, rec.dict_key)
+                        if leaf_pt is None:
+                            continue
+                        _write_leaf(
+                            per_target_overlay[tid_pt],
+                            rec.path.segments,
+                            rec.target_key,
+                            leaf_pt,
+                            rec.dict_key,
+                        )
                 continue
             # CONSENSUAL: if the winning side is a target, look up the
             # actual leaf value on that target's neutral (the serialized
@@ -217,8 +327,16 @@ class MergeEngine:
             # target-keyed leaf, the lookup honours `target_key`.
             if cl.winning_target is not None:
                 src_neutral = per_target_neutral[cl.winning_target]
-                live_leaf = _read_leaf(src_neutral, rec.path.segments, rec.target_key)
-                _write_leaf(composed, rec.path.segments, rec.target_key, live_leaf)
+                live_leaf = _read_leaf(src_neutral, rec.path.segments, rec.target_key, rec.dict_key)
+                _write_leaf(composed, rec.path.segments, rec.target_key, live_leaf, rec.dict_key)
+                for overlay in per_target_overlay.values():
+                    _write_leaf(
+                        overlay,
+                        rec.path.segments,
+                        rec.target_key,
+                        live_leaf,
+                        rec.dict_key,
+                    )
             # winning_source is NEUTRAL (or both agree) → composed already
             # carries the value via the n1 deep-copy; nothing to do.
 
@@ -230,7 +348,24 @@ class MergeEngine:
             resolved = self._resolver.resolve(c)
             if resolved is None:
                 continue
-            _write_leaf(composed, c.record.path.segments, c.record.target_key, resolved)
+            _write_leaf(
+                composed,
+                c.record.path.segments,
+                c.record.target_key,
+                resolved,
+                c.record.dict_key,
+            )
+            # An explicit resolution overrides per-target preservation —
+            # the operator (or strategy) made a choice, propagate it
+            # everywhere.
+            for overlay in per_target_overlay.values():
+                _write_leaf(
+                    overlay,
+                    c.record.path.segments,
+                    c.record.target_key,
+                    resolved,
+                    c.record.dict_key,
+                )
 
         # 6b. Compose pass-through bags per target.
         #
@@ -258,9 +393,15 @@ class MergeEngine:
             target_cls = self.targets.get(tid)
             if target_cls is None:
                 continue
+            # Re-derive from this target's per-target overlay rather than
+            # the bare ``composed``. The overlay is identical to composed
+            # for every authored / consensual leaf, but carries this
+            # target's preserved values for unauthored cross-target
+            # conflicts (issue #44 — see classification block above).
+            target_view = per_target_overlay.get(tid, composed)
             per_domain_sections: dict[Domains, BaseModel] = {}
             for codec_cls in target_cls.codecs:
-                neutral_field = getattr(composed, codec_cls.domain.value)
+                neutral_field = getattr(target_view, codec_cls.domain.value)
                 try:
                     section = codec_cls.to_target(neutral_field, ctx2)
                 except NotImplementedError:
