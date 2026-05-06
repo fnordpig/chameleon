@@ -1,9 +1,13 @@
 # Exemplar Smoke Findings (post-Wave-4)
 
 **Date:** 2026-05-06
-**Status:** Diagnostic. Surfaces issues found by running `chameleon init`
-+ `chameleon merge` end-to-end against the sanitized real-world
-exemplar fixture at `tests/fixtures/exemplar/`.
+**Status:** Closed by Wave-5. Originally diagnostic, surfacing four
+real bugs in the V0+post-Wave-4 build by running `chameleon init` +
+`chameleon merge` end-to-end against the sanitized real-world
+exemplar fixture at `tests/fixtures/exemplar/`. All four are now
+fixed and the smoke (`tests/integration/test_exemplar_smoke.py`)
+runs all assertions as live tests; this doc is kept as a
+post-mortem. See "Resolution" section at the end.
 
 After four waves of parity work that closed every node enumerated in
 `2026-05-06-parity-gap.md`, the smoke run against the exemplar reveals
@@ -84,26 +88,25 @@ order shifts.
 
 **Fix scope:** trivial. Sort by key in the reconciler. ~5 lines.
 
-### B4: `dump_json` escapes non-ASCII, corrupting partial-owned writes
+### B4: Non-ASCII escaped in partial-owned writes
 
 The exemplar's `~/.claude.json` has an em-dash (`—`, U+2014) in the
 `companion.personality` string. After `chameleon merge`, the partial-
-owned write path re-serializes the merged dict through
-`src/chameleon/io/json.py:dump_json`, which uses Python's default
-`json.dumps` — escaping `—` to `—`.
+owned write path re-serialized the merged dict with `\uXXXX` escapes,
+breaking `chameleon discard`'s round-trip.
 
-Net effect:
-- The state-repo HEAD captures the original em-dash bytes (via the
-  raw assembler `existing` overlay which doesn't go through dump_json).
-- The live file post-merge has the escape sequence.
-- `chameleon diff` then reports phantom drift on every non-ASCII char
-  in `~/.claude.json` (and there are several — emoji, unicode quotes,
-  etc. in real Claude configs).
+**Root cause (corrected):** `io/json.py:dump_json` had already been
+fixed to pass `ensure_ascii=False` on 2026-05-06 — the original
+findings doc was wrong about the location. The actual broken path
+was a duplicate inline `json.dumps(...)` call in
+`src/chameleon/state/locks.py:67` (inside `partial_owned_write`)
+that bypassed the canonical `dump_json` entirely. Wave-5 Agent R
+caught this and routed the partial-owned write through `dump_json`,
+which is the principled fix. Lesson: a single canonical serialiser
+is worth more than one-line workarounds in N call sites.
 
-**Root cause:** `io/json.py:dump_json` doesn't pass `ensure_ascii=False`.
-
-**Fix scope:** trivial. ~1 line. Plus a regression test that uses
-non-ASCII content in fixture data.
+**Fix shipped:** `src/chameleon/state/locks.py` now calls
+`dump_json(merged, indent=2)` instead of inline `json.dumps`.
 
 ### B3: Per-FieldPath leaf-write doesn't coerce through schema annotations
 
@@ -182,3 +185,29 @@ Wave-5 — four truly disjoint Opus agents:
 After W5 lands, every xfail in `tests/integration/test_exemplar_smoke.py`
 flips to a passing assertion and the exemplar smoke becomes the V1
 acceptance gate.
+
+## Resolution
+
+Wave-5 dispatched four parallel Opus agents (one per bug) and all
+four fixes landed via merge commits on main between SHAs `f33b8cb`
+and `f9d07a4`. After merge:
+
+- `tests/integration/test_exemplar_smoke.py`: all 9 tests pass, 0
+  xfails. The smoke is now a live regression test, not a
+  documentation of known bugs.
+- 268 tests pass on main (was 246 with 4 xfails pre-Wave-5).
+- All four gates green.
+
+**Per-bug shipping status:**
+
+| ID | Branch | SHA | Behavior fix |
+|---|---|---|---|
+| B1 | `parity/b1-subtable-preservation` | `0008179` | All codec section models flipped to `extra="allow"` (with documented exception for `ClaudeDirectivesSection` whose `forbid` is the routing-to-passthrough discipline for legacy attribution aliases). Two helpers added to `targets/_protocol.py` (`harvest_section_extras`, `merge_extras_into_dict`); both assemblers re-disassemble the existing target file at assemble time and merge sub-table extras into the produced doc with "modelled wins" overlay. |
+| B2 | `parity/b2-stable-reconciliation` | `557c696` | `reconcile_plugins` and the capabilities codecs sort dict iterations by key. Both reconciler and codec sort: belt-and-suspenders, since the engine flow goes through `walk_changes` not `reconcile_plugins` directly. |
+| B3 | `parity/b3-leaf-write-coercion` | `6bec01c` | `_coerce_through_annotation(annotation, value)` helper in `merge/engine.py` wraps `TypeAdapter(annotation).validate_python(value)`. `_write_leaf` branches between scalar leaves (full annotation) and `dict[K, V]` leaves (extracts V via `typing.get_args`). The `value=None` drop-the-key semantics are preserved. |
+| B4 | `parity/b4-ensure-ascii-false` | `1eb7db6` | `state/locks.py:partial_owned_write` now routes through canonical `dump_json` instead of inline `json.dumps`. (See corrected root-cause note in B4 section above — `dump_json` itself was already correct.) |
+
+The exemplar smoke (`test_exemplar_smoke.py`) plus three new regression
+suites (`test_subtable_preservation.py`, `test_capabilities_reconciler_ordering.py`,
+`test_engine_leaf_write_coercion.py`, `test_io_json_unicode.py`) now
+pin all four bugs as closed-and-non-regressing.
