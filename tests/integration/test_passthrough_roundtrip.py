@@ -68,9 +68,11 @@ def test_passthrough_from_neutral_lands_in_target(
     }
     neutral_file.write_text(dump_yaml(operator_contents), encoding="utf-8")
 
-    # Use --on-conflict=keep — same workaround as test_v0_acceptance for
-    # P2-1 (per-FieldPath classification, separate node).
-    assert cli.main(["merge", "--on-conflict=keep"]) == 0
+    # Per-FieldPath classification (P2-1) means `identity.model[claude]`
+    # no longer false-conflicts on a fresh-from-neutral merge. Run with
+    # --on-conflict=fail so any unexpected drift surfaces as a hard
+    # failure rather than being silently dropped.
+    assert cli.main(["merge", "--on-conflict=fail"]) == 0
 
     settings = load_json(paths["home"] / ".claude" / "settings.json")
     assert settings.get("customKey") == "customValue"
@@ -101,7 +103,7 @@ def test_passthrough_survives_deleted_live_file(
 
     # init absorbs the live state; first merge adopts unclaimed key into neutral.
     assert cli.main(["init"]) == 0
-    assert cli.main(["merge", "--on-conflict=keep"]) == 0
+    assert cli.main(["merge", "--on-conflict=fail"]) == 0
 
     # The neutral file now must carry the unclaimed key in its targets bag —
     # otherwise the next merge would have nothing to re-derive from after
@@ -122,8 +124,10 @@ def test_passthrough_survives_deleted_live_file(
     assert not live_settings.exists()
 
     # Re-running merge must regenerate the file from neutral alone, with
-    # the unclaimed key intact.
-    assert cli.main(["merge", "--on-conflict=keep"]) == 0
+    # the unclaimed key intact. Use --on-conflict=fail to surface any
+    # spurious drift that per-FieldPath classification was supposed to
+    # eliminate.
+    assert cli.main(["merge", "--on-conflict=fail"]) == 0
     assert live_settings.exists()
     settings = load_json(live_settings)
     assert "extraKnownMarketplaces" in settings, (

@@ -60,7 +60,7 @@ class NonInteractiveResolver:
         kind = self.strategy.kind
         if kind is OnConflict.FAIL:
             msg = (
-                f"conflict on {record.domain.value}.{record.path.render()}: "
+                f"conflict on {record.render_path()}: "
                 f"neutral={record.n1!r} per_target={record.per_target!r}"
             )
             raise RuntimeError(msg)
@@ -90,7 +90,7 @@ class InteractiveResolver:
 
     def resolve(self, conflict: Conflict) -> Any:
         record = conflict.record
-        path_label = f"{record.domain.value}.{record.path.render()}"
+        path_label = record.render_path()
 
         # Render the four sources with letter codes
         table = Table(

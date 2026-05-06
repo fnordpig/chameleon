@@ -5,26 +5,26 @@ V0 implements a simplified version of the full §4.3 pipeline:
     re-derive, write live, commit state-repos, update neutral.
   - Interactive resolution is deferred; V0 accepts only Strategy
     (non-interactive).
-  - Change classification operates at domain granularity rather than
-    per-FieldPath; per-leaf classification lands when the authorization
-    codec ships.
+  - Change classification (P2-1) is per-FieldPath via
+    ``walk_changes``: each leaf in the neutral schema becomes its own
+    ``ChangeRecord``, and ``dict[TargetId, V]`` fields split into one
+    record per ``TargetId`` key — see ``merge/changeset.py``.
 """
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from chameleon._types import FieldPath, TargetId
+from chameleon._types import TargetId
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge.changeset import (
     ChangeOutcome,
-    ChangeRecord,
     classify_change,
+    walk_changes,
 )
 from chameleon.merge.conflict import Conflict
 from chameleon.merge.resolve import NonInteractiveResolver, Resolver, Strategy
@@ -39,6 +39,59 @@ from chameleon.state.transaction import (
 )
 from chameleon.targets._protocol import Target
 from chameleon.targets._registry import TargetRegistry
+
+
+def _resolve_parent(root: BaseModel, segments: tuple[str, ...]) -> BaseModel:
+    """Walk to the parent node of the leaf identified by ``segments``.
+
+    Each intermediate segment must name a Pydantic field whose value is
+    itself a ``BaseModel``; raises ``AttributeError`` otherwise. The
+    leaf segment is *not* descended into — caller does the final get/set.
+    """
+    node: BaseModel = root
+    for seg in segments[:-1]:
+        node = getattr(node, seg)
+    return node
+
+
+def _read_leaf(root: BaseModel, segments: tuple[str, ...], target_key: TargetId | None) -> object:
+    """Read a leaf value (optionally indexed into a ``dict[TargetId, V]``)."""
+    parent = _resolve_parent(root, segments)
+    leaf = getattr(parent, segments[-1])
+    if target_key is None:
+        return leaf
+    if not isinstance(leaf, dict):
+        return None
+    return leaf.get(target_key)
+
+
+def _write_leaf(
+    root: BaseModel,
+    segments: tuple[str, ...],
+    target_key: TargetId | None,
+    value: object,
+) -> None:
+    """Write ``value`` at the leaf, preserving ``dict[TargetId, V]`` semantics.
+
+    For target-keyed leaves we mutate (or initialize) the inner dict so
+    other ``TargetId`` keys present on ``composed`` are preserved.
+    """
+    parent = _resolve_parent(root, segments)
+    leaf_name = segments[-1]
+    if target_key is None:
+        setattr(parent, leaf_name, value)
+        return
+
+    current = getattr(parent, leaf_name)
+    if not isinstance(current, dict):
+        current = {}
+    if value is None:
+        # Resolver returned no value for this key — drop it rather than
+        # writing None, which would break round-trip equality.
+        current.pop(target_key, None)
+    else:
+        current[target_key] = value
+    setattr(parent, leaf_name, current or None)
 
 
 class MergeRequest(BaseModel):
@@ -138,45 +191,46 @@ class MergeEngine:
 
             per_target_neutral[tid] = target_neutral
 
-        # 3-5. Classify each domain and gather conflicts
+        # 3-5. Classify per FieldPath (P2-1) and gather conflicts.
+        #
+        # `walk_changes` produces one ChangeRecord per leaf path, with a
+        # special-case for `dict[TargetId, V]` fields (one record per
+        # TargetId key, scoped to that target's own evidence). We apply
+        # consensual outcomes by writing the chosen leaf value into
+        # `composed`, preserving sibling keys on target-keyed dicts.
         merge_id = transaction_id()
         conflicts: list[Conflict] = []
         composed = n1.model_copy(deep=True)
 
-        for domain in Domains:
-            n0_val = getattr(n0, domain.value)
-            n1_val = getattr(n1, domain.value)
-            per_target_vals: dict[TargetId, Any] = {
-                tid: getattr(neutral, domain.value) for tid, neutral in per_target_neutral.items()
-            }
-
-            record = ChangeRecord(
-                domain=domain,
-                path=FieldPath(segments=(domain.value,)),
-                n0=n0_val.model_dump(mode="json") if hasattr(n0_val, "model_dump") else n0_val,
-                n1=n1_val.model_dump(mode="json") if hasattr(n1_val, "model_dump") else n1_val,
-                per_target={
-                    tid: v.model_dump(mode="json") if hasattr(v, "model_dump") else v
-                    for tid, v in per_target_vals.items()
-                },
-            )
-            cl = classify_change(record)
+        records = walk_changes(n0, n1, per_target_neutral)
+        for rec in records:
+            cl = classify_change(rec)
             if cl.outcome is ChangeOutcome.UNCHANGED:
                 continue
             if cl.outcome is ChangeOutcome.CONFLICT:
-                conflicts.append(Conflict(record=record))
+                conflicts.append(Conflict(record=rec))
                 continue
+            # CONSENSUAL: if the winning side is a target, look up the
+            # actual leaf value on that target's neutral (the serialized
+            # `cl.resolved_value` is for compare-equality only — we want
+            # the in-Python value to keep Pydantic types intact). For a
+            # target-keyed leaf, the lookup honours `target_key`.
             if cl.winning_target is not None:
                 src_neutral = per_target_neutral[cl.winning_target]
-                setattr(composed, domain.value, getattr(src_neutral, domain.value))
+                live_leaf = _read_leaf(src_neutral, rec.path.segments, rec.target_key)
+                _write_leaf(composed, rec.path.segments, rec.target_key, live_leaf)
+            # winning_source is NEUTRAL (or both agree) → composed already
+            # carries the value via the n1 deep-copy; nothing to do.
 
-        # 6. Resolve conflicts via the configured resolver
+        # 6. Resolve conflicts via the configured resolver. The resolver
+        # returns the chosen leaf value (or None to skip); we apply it
+        # at the same path/target_key. Pydantic models in resolved
+        # values pass through `_write_leaf` as-is.
         for c in conflicts:
             resolved = self._resolver.resolve(c)
             if resolved is None:
                 continue
-            domain_cls = type(getattr(composed, c.record.domain.value))
-            setattr(composed, c.record.domain.value, domain_cls.model_validate(resolved))
+            _write_leaf(composed, c.record.path.segments, c.record.target_key, resolved)
 
         # 6b. Compose pass-through bags per target.
         #
