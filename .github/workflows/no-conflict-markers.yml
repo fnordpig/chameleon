@@ -1,0 +1,75 @@
+name: no-conflict-markers
+
+# Defense-in-depth guard against committed git conflict markers reaching
+# the tree. The chameleon Wave-2 effort had a near-miss where commit
+# fe084b1 was created with raw conflict markers in tracked files (caught
+# and discarded before reaching main). This workflow makes sure CI fails
+# loudly if it ever happens again.
+#
+# A complementary pytest regression (tests/integration/test_no_conflict_markers.py)
+# enforces the same rule on every gates run, and the opt-in pre-commit
+# hook at tools/pre-commit-no-conflict-markers.sh fails locally before
+# the bad commit can even be created. Three layers, one rule.
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    name: scan tracked files for conflict markers
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Scan for conflict markers
+        # The patterns are assembled from character repetition at runtime
+        # so this workflow file itself never contains a literal conflict
+        # marker line that the scanner would self-match. The patterns
+        # used (after construction) are anchored to start-of-line:
+        #   ^<{7} <ref>     (start marker, trailing space + ref)
+        #   ^={7}$          (separator marker, bare line)
+        #   ^>{7} <ref>     (end marker, trailing space + ref)
+        # Scope: tracked files under src/, tests/, docs/, tools/,
+        # .github/, plus top-level *.py *.md *.toml *.yml *.yaml.
+        # Excludes this workflow, .git/, vendor/.
+        run: |
+          set -euo pipefail
+          LT=$(printf '%.0s<' {1..7})
+          EQ=$(printf '%.0s=' {1..7})
+          GT=$(printf '%.0s>' {1..7})
+          PATTERN="^(${LT} |${EQ}\$|${GT} )"
+
+          # Collect candidate files via git ls-files so we never touch
+          # untracked junk or .git/ internals.
+          mapfile -t FILES < <(
+            git ls-files \
+              'src/**' 'tests/**' 'docs/**' 'tools/**' '.github/**' \
+              '*.py' '*.md' '*.toml' '*.yml' '*.yaml' \
+            | grep -v '^\.github/workflows/no-conflict-markers\.yml$' \
+            | grep -v '^tools/pre-commit-no-conflict-markers\.sh$' \
+            | grep -v '^tests/integration/test_no_conflict_markers\.py$' \
+            | grep -v '^vendor/' || true
+          )
+
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "no candidate files; skipping"
+            exit 0
+          fi
+
+          # grep -E with anchored multi-pattern; -n for line numbers,
+          # -H to force filename, -- to terminate options before paths.
+          if grep -EnH -- "${PATTERN}" "${FILES[@]}"; then
+            echo ""
+            echo "ERROR: tracked file(s) contain raw git conflict markers."
+            echo "Resolve the conflict and re-stage before committing."
+            exit 1
+          fi
+
+          echo "ok: no conflict markers found in $(printf '%s\n' "${FILES[@]}" | wc -l | tr -d ' ') tracked files"

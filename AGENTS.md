@@ -75,6 +75,22 @@ A-or-B per neutral key. No inline editing, no three-way text merging.
 If a future feature needs richer resolution, design it as a separate
 spec, not a runtime patch.
 
+## Pre-commit hook (opt-in)
+
+A defensive guard against committing raw git conflict markers lives at
+`tools/pre-commit-no-conflict-markers.sh`. It is **not** auto-installed
+— operators opt in. To enable it for your local clone:
+
+```sh
+ln -s ../../tools/pre-commit-no-conflict-markers.sh .git/hooks/pre-commit
+```
+
+The hook inspects only the staged diff and rejects the commit (fast,
+locally) if any added line is a raw conflict marker. The same rule is
+enforced server-side by the `no-conflict-markers` workflow and by
+`tests/integration/test_no_conflict_markers.py` — three layers, one
+rule. The hook is the cheapest of the three; install it.
+
 ## Schema discipline
 
 The neutral schema is centrally defined in `src/chameleon/schema/`.
