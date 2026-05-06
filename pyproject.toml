@@ -1,0 +1,83 @@
+[build-system]
+requires = ["hatchling>=1.21"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chameleon"
+description = "Transpile a neutral agent configuration into Claude Code, Codex CLI, and other agent-specific formats — and back again."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Robert Waugh" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities",
+]
+dynamic = ["version"]
+dependencies = [
+    "pydantic>=2.7",
+    "ruamel.yaml>=0.18",
+    "tomlkit>=0.13",
+    "platformdirs>=4",
+    "rich>=13",
+]
+
+[project.scripts]
+chameleon = "chameleon.cli:main"
+
+[project.entry-points."chameleon.targets"]
+claude = "chameleon.targets.claude:ClaudeTarget"
+codex = "chameleon.targets.codex:CodexTarget"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-cov>=5",
+    "hypothesis>=6.100",
+    "ruff>=0.15",
+    "ty>=0.0.34",
+]
+schema-sync = [
+    "datamodel-code-generator>=0.27",
+]
+
+[tool.hatch.version]
+path = "src/chameleon/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chameleon"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+extend-exclude = ["src/chameleon/codecs/*/_generated.py"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PT", "PL", "N"]
+# PLR0913 (too many arguments): codecs and merge engine legitimately need many.
+# PLR2004 (magic value): triggers on test asserts; we want to read literal expected values.
+ignore = ["PLR0913", "PLR2004"]
+
+[tool.ruff.format]
+preview = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
+markers = [
+    "schema_drift: validates codec field-paths against generated upstream models",
+    "concurrency: exercises partial-ownership concurrency discipline",
+    "recovery: exercises transaction-marker recovery",
+    "golden: byte-identical golden-file fixtures",
+]
+
+[tool.ty.src]
+include = ["src", "tests"]
