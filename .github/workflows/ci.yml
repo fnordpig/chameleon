@@ -27,11 +27,16 @@ jobs:
         os: [ubuntu-latest, macos-latest]
         python: ["3.12", "3.13"]
     steps:
+      # Both actions are SHA-pinned per supply-chain hygiene. setup-uv v8+
+      # stopped publishing floating major tags after the tj-actions
+      # incident; the SHA is the only durable reference. The trailing
+      # comment names the human-readable version dependabot/renovate
+      # use to bump.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
         with:
           enable-cache: true
           cache-dependency-glob: "uv.lock"
