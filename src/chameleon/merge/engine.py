@@ -14,9 +14,11 @@ V0 implements a simplified version of the full §4.3 pipeline:
 from __future__ import annotations
 
 import os
+import types
+import typing
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, TypeAdapter
 
 from chameleon._types import TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
@@ -127,6 +129,38 @@ def _materialize_intermediate_models(root: BaseModel, segments: tuple[str, ...])
     return node
 
 
+def _strip_optional(annotation: object) -> object:
+    """Return ``annotation`` with any ``| None`` arm removed.
+
+    Schema fields are routinely typed ``X | None``; the field's
+    annotation comes back as a ``Union[X, None]`` (PEP 604 ``X | None``
+    surfaces as ``types.UnionType``). For coercion we want the inner
+    ``X`` (e.g. ``dict[TargetId, str]``), so the dict-arm-detection code
+    can pull V out of it. If the union has no None arm or isn't a union
+    at all, the annotation is returned unchanged.
+    """
+    origin = typing.get_origin(annotation)
+    if origin is typing.Union or origin is types.UnionType:
+        non_none = tuple(a for a in typing.get_args(annotation) if a is not type(None))
+        if len(non_none) == 1:
+            return non_none[0]
+        # Pathological multi-arm union — leave for TypeAdapter to handle.
+    return annotation
+
+
+def _coerce_through_annotation(annotation: object, value: object) -> object:
+    """Run ``value`` through ``TypeAdapter(annotation).validate_python``.
+
+    Pydantic's ``TypeAdapter`` handles ``X | None``, ``Enum``, ``Literal``,
+    ``list[X]``, ``dict[X, Y]``, and nested ``BaseModel`` subclasses
+    uniformly — accepting the already-coerced object as a no-op or
+    coercing a raw scalar / dict into the schema-appropriate type. The
+    engine relies on that uniformity rather than special-casing each
+    annotation kind.
+    """
+    return TypeAdapter(annotation).validate_python(value)
+
+
 def _write_leaf(
     root: BaseModel,
     segments: tuple[str, ...],
@@ -140,11 +174,29 @@ def _write_leaf(
     other ``TargetId`` keys present on ``composed`` are preserved. The
     same rule applies to ``dict_key`` (issue #44): we mutate just that
     str-keyed entry, leaving sibling keys untouched.
+
+    Schema-aware coercion (B3): ``setattr`` bypasses Pydantic's
+    field-level validators, so the resolver's raw return values
+    (``str`` for an ``Enum`` field, ``dict`` for a nested model, etc.)
+    must be funneled through ``TypeAdapter(annotation).validate_python``
+    before assignment. Without that, downstream codecs that call
+    ``.value`` on what they assume is an ``Enum`` member crash on the
+    raw ``str``.
+
+    For keyed-dict leaves the coerced annotation is the dict's value
+    type (extracted via ``typing.get_args``), not the dict annotation
+    itself — we're writing one V at a time, not the whole dict.
     """
     parent = _materialize_intermediate_models(root, segments)
     leaf_name = segments[-1]
+    field_annotation = type(parent).model_fields[leaf_name].annotation
+
     if target_key is None and dict_key is None:
-        setattr(parent, leaf_name, value)
+        # Scalar leaf: coerce through the field's full annotation
+        # (which already includes any ``| None`` arm, so ``value=None``
+        # round-trips cleanly for Optional fields).
+        coerced = _coerce_through_annotation(field_annotation, value)
+        setattr(parent, leaf_name, coerced)
         return
 
     current = getattr(parent, leaf_name)
@@ -164,7 +216,19 @@ def _write_leaf(
         # writing None, which would break round-trip equality.
         current.pop(key, None)
     else:
-        current[key] = value
+        # The dict-keyed leaf's annotation is e.g. ``dict[TargetId, str]``
+        # or ``dict[TargetId, str] | None`` — strip Optional, then pull
+        # V out of the dict's type args so we coerce one entry at a time.
+        dict_annotation = _strip_optional(field_annotation)
+        type_args = typing.get_args(dict_annotation)
+        if len(type_args) == 2:  # ``dict[K, V]`` always exposes exactly 2 type args.
+            value_annotation = type_args[1]
+            current[key] = _coerce_through_annotation(value_annotation, value)
+        else:
+            # Annotation isn't a recognizable ``dict[K, V]`` — fall back
+            # to the raw write and let Pydantic catch a type mismatch on
+            # the final ``setattr``.
+            current[key] = value
     # ``dict[TargetId, V]`` is typed ``dict | None`` on most schemas
     # (e.g. ``identity.model``); collapse to ``None`` when empty so the
     # field's nullability invariant holds. ``dict[str, V]`` schema fields

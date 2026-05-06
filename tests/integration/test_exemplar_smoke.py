@@ -208,14 +208,6 @@ def test_keep_merge_is_byte_idempotent(exemplar_env: dict[str, Path]) -> None:
     assert a == b, "second keep-merge changed live files"
 
 
-@pytest.mark.xfail(
-    reason="B3: per-FieldPath leaf-write does setattr without coercing "
-    "value through field.annotation; resolver returns 'xhigh' (str), "
-    "_write_leaf assigns it to a ReasoningEffort enum field, "
-    "to_target's `.value` access then crashes. "
-    "See docs/superpowers/specs/2026-05-06-smoke-findings.md.",
-    strict=True,
-)
 def test_prefer_neutral_resolves_real_conflict(exemplar_env: dict[str, Path]) -> None:
     """Operator authors a unified value; --on-conflict=prefer-neutral
     should resolve and re-derive cleanly.
