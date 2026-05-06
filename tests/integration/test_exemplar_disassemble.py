@@ -89,9 +89,10 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
     # What the parity-gap doc explicitly notes as unclaimed and
     # therefore SHOULD land in pass-through. ``marketplaces`` and ``plugins``
     # used to be on this list; they were claimed by P1-A and are now in
-    # the capabilities domain (see assertion above).
+    # the capabilities domain (see assertion above). ``personality`` was
+    # also on this list pre-P1-E; it is now claimed by the directives
+    # codec and lives in the directives domain.
     expected_passthrough = {
-        "personality",
         "model_context_window",
         "model_auto_compact_token_limit",
         "model_catalog_json",
@@ -101,7 +102,7 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
     assert not missing, (
         f"expected passthrough keys missing: {missing}; got passthrough={sorted(passthrough)}"
     )
-    # Conversely: ensure ``plugins`` / ``marketplaces`` are NOT in passthrough
-    # any more — the codec owns them now.
-    leaked = {"plugins", "marketplaces"} & set(passthrough)
-    assert not leaked, f"P1-A-claimed keys leaked to pass-through: {leaked}"
+    # Conversely: ensure ``plugins`` / ``marketplaces`` / ``personality``
+    # are NOT in passthrough any more — codecs own them now (P1-A, P1-E).
+    leaked = {"plugins", "marketplaces", "personality"} & set(passthrough)
+    assert not leaked, f"codec-claimed keys leaked to pass-through: {leaked}"

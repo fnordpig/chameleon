@@ -180,7 +180,7 @@ class CodexAssembler:
         as_dict = dict(doc)
 
         identity_keys = {"model", "model_reasoning_effort"}
-        directives_keys = {"model_instructions_file", "commit_attribution"}
+        directives_keys = {"model_instructions_file", "commit_attribution", "personality"}
         capabilities_keys = {"mcp_servers", "plugins", "marketplaces"}
         environment_keys = {"shell_environment_policy"}
         authorization_keys = {"sandbox_mode", "sandbox_workspace_write"}
