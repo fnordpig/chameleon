@@ -137,7 +137,19 @@ class ClaudeAssembler:
             settings = {}
 
         identity_keys = {"model", "effortLevel", "alwaysThinkingEnabled"}
-        directives_keys = {"outputStyle", "attribution"}
+        # The legacy bool aliases (coauthoredBy, gitAttribution) are
+        # community/older variants the schemastore-derived ClaudeSettings
+        # does not model; the directives codec accepts them at section
+        # validation time and resolves precedence across all four. We
+        # route all of them here so end-to-end disassemble surfaces
+        # them — see commit 7a12e47 for the codec-side rationale.
+        directives_keys = {
+            "outputStyle",
+            "attribution",
+            "includeCoAuthoredBy",
+            "coauthoredBy",
+            "gitAttribution",
+        }
         environment_keys = {"env"}
         authorization_keys = {"permissions", "sandbox"}
         lifecycle_keys = {"cleanupPeriodDays"}
