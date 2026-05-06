@@ -87,21 +87,26 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
         "the capabilities domain should now disassemble from this exemplar"
     )
     # What the parity-gap doc explicitly notes as unclaimed and
-    # therefore SHOULD land in pass-through. ``marketplaces`` and ``plugins``
-    # used to be on this list; they were claimed by P1-A and are now in
-    # the capabilities domain (see assertion above).
+    # therefore SHOULD land in pass-through. Two cohorts have already
+    # been claimed:
+    #   - ``marketplaces`` and ``plugins``       — P1-A (capabilities)
+    #   - ``model_context_window``,
+    #     ``model_auto_compact_token_limit``,
+    #     ``model_catalog_json``                 — P1-F (identity extras)
     expected_passthrough = {
         "personality",
-        "model_context_window",
-        "model_auto_compact_token_limit",
-        "model_catalog_json",
         "approvals_reviewer",
     }
     missing = expected_passthrough - set(passthrough)
     assert not missing, (
         f"expected passthrough keys missing: {missing}; got passthrough={sorted(passthrough)}"
     )
-    # Conversely: ensure ``plugins`` / ``marketplaces`` are NOT in passthrough
-    # any more — the codec owns them now.
-    leaked = {"plugins", "marketplaces"} & set(passthrough)
-    assert not leaked, f"P1-A-claimed keys leaked to pass-through: {leaked}"
+    # Conversely: ensure already-claimed keys are NOT in pass-through.
+    leaked_p1a = {"plugins", "marketplaces"} & set(passthrough)
+    assert not leaked_p1a, f"P1-A-claimed keys leaked to pass-through: {leaked_p1a}"
+    leaked_p1f = {
+        "model_context_window",
+        "model_auto_compact_token_limit",
+        "model_catalog_json",
+    } & set(passthrough)
+    assert not leaked_p1f, f"P1-F-claimed keys leaked to pass-through: {leaked_p1f}"

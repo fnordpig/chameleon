@@ -4,6 +4,14 @@ Maps neutral.identity ↔ Claude settings.json keys:
   reasoning_effort -> effortLevel  (low/medium/high/xhigh)
   thinking         -> alwaysThinkingEnabled
   model[claude]    -> model
+
+P1-F — three Codex-only identity tuning knobs have no Claude analogue:
+  context_window, compact_threshold, model_catalog_path
+If any of these is set on the neutral Identity, this codec emits a
+LossWarning naming P1-F (so the operator can see what didn't propagate
+and the warnings are surfaced in MergeResult). The values themselves
+survive the round-trip via the Codex codec lane; this codec's only job
+is to be honest that Claude can't host them.
 """
 
 from __future__ import annotations
@@ -68,6 +76,41 @@ class ClaudeIdentityCodec:
                         field_path=FieldPath(segments=("model",)),
                     )
                 )
+        # P1-F — Codex-only identity tuning knobs. No Claude analogue;
+        # warn per field so the operator sees exactly what didn't propagate.
+        if model.context_window is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.IDENTITY,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "P1-F: identity.context_window is a Codex-only tuning "
+                        "knob (model_context_window); not propagating to Claude"
+                    ),
+                )
+            )
+        if model.compact_threshold is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.IDENTITY,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "P1-F: identity.compact_threshold is a Codex-only tuning "
+                        "knob (model_auto_compact_token_limit); not propagating to Claude"
+                    ),
+                )
+            )
+        if model.model_catalog_path is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.IDENTITY,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "P1-F: identity.model_catalog_path is a Codex-only tuning "
+                        "knob (model_catalog_json); not propagating to Claude"
+                    ),
+                )
+            )
         return section
 
     @staticmethod

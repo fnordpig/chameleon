@@ -179,7 +179,14 @@ class CodexAssembler:
         doc = load_toml(raw.decode("utf-8")) if raw else {}
         as_dict = dict(doc)
 
-        identity_keys = {"model", "model_reasoning_effort"}
+        identity_keys = {
+            "model",
+            "model_reasoning_effort",
+            # P1-F — Codex-only identity tuning knobs.
+            "model_context_window",
+            "model_auto_compact_token_limit",
+            "model_catalog_json",
+        }
         directives_keys = {"model_instructions_file", "commit_attribution"}
         capabilities_keys = {"mcp_servers", "plugins", "marketplaces"}
         environment_keys = {"shell_environment_policy"}

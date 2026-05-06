@@ -1,9 +1,18 @@
 """Codex codec for identity.
 
 Maps:
-  reasoning_effort -> model_reasoning_effort  (minimal/low/medium/high/xhigh)
-  model[codex]     -> model
-  thinking         -> n/a in Codex (LossWarning if set)
+  reasoning_effort   -> model_reasoning_effort  (minimal/low/medium/high/xhigh)
+  model[codex]       -> model
+  thinking           -> n/a in Codex (LossWarning if set)
+
+P1-F — Codex-only identity tuning knobs (claimed here; no analogue in Claude):
+  context_window     -> model_context_window
+  compact_threshold  -> model_auto_compact_token_limit
+  model_catalog_path -> model_catalog_json
+
+The neutral schema uses cross-target vocabulary; this codec is the single
+place that maps neutral names to Codex's wire names. Round-trip preserves
+each field exactly (subject to the int/str types declared on the section).
 """
 
 from __future__ import annotations
@@ -22,6 +31,12 @@ class CodexIdentitySection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str | None = None
     model_reasoning_effort: str | None = None
+    # P1-F — Codex-only identity tuning knobs. Field names mirror the
+    # upstream Codex config.toml keys exactly so the assembler can splat
+    # via `model_dump(exclude_none=True)`.
+    model_context_window: int | None = None
+    model_auto_compact_token_limit: int | None = None
+    model_catalog_json: str | None = None
 
 
 class CodexIdentityCodec:
@@ -32,6 +47,10 @@ class CodexIdentityCodec:
         {
             FieldPath(segments=("model",)),
             FieldPath(segments=("model_reasoning_effort",)),
+            # P1-F additions:
+            FieldPath(segments=("model_context_window",)),
+            FieldPath(segments=("model_auto_compact_token_limit",)),
+            FieldPath(segments=("model_catalog_json",)),
         }
     )
 
@@ -63,6 +82,13 @@ class CodexIdentityCodec:
                     message="identity.thinking has no Codex equivalent; not propagating",
                 )
             )
+        # P1-F — Codex-only identity tuning knobs. Lossless on Codex.
+        if model.context_window is not None:
+            section.model_context_window = model.context_window
+        if model.compact_threshold is not None:
+            section.model_auto_compact_token_limit = model.compact_threshold
+        if model.model_catalog_path is not None:
+            section.model_catalog_json = model.model_catalog_path
         return section
 
     @staticmethod
@@ -84,6 +110,13 @@ class CodexIdentityCodec:
                 )
         if section.model is not None:
             ident.model = {BUILTIN_CODEX: section.model}
+        # P1-F — reverse mapping for Codex-only identity tuning knobs.
+        if section.model_context_window is not None:
+            ident.context_window = section.model_context_window
+        if section.model_auto_compact_token_limit is not None:
+            ident.compact_threshold = section.model_auto_compact_token_limit
+        if section.model_catalog_json is not None:
+            ident.model_catalog_path = section.model_catalog_json
         return ident
 
 
