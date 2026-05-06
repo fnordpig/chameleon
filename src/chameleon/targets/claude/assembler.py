@@ -106,6 +106,16 @@ class ClaudeAssembler:
             dotclaude_overlay["mcpServers"] = {
                 k: v.model_dump(exclude_none=True) for k, v in capabilities.mcpServers.items()
             }
+            # ``enabledPlugins`` and ``extraKnownMarketplaces`` live in
+            # settings.json (NOT ~/.claude.json — Claude's user-level plugin
+            # config is in the same file as everything else).
+            if capabilities.enabled_plugins:
+                settings_obj["enabledPlugins"] = dict(capabilities.enabled_plugins)
+            if capabilities.extra_known_marketplaces:
+                settings_obj["extraKnownMarketplaces"] = {
+                    name: mp.model_dump(by_alias=True, exclude_none=True)
+                    for name, mp in capabilities.extra_known_marketplaces.items()
+                }
 
         # Splice pass-through into settings.json verbatim.
         for k, v in passthrough.items():
@@ -125,7 +135,7 @@ class ClaudeAssembler:
         }
 
     @staticmethod
-    def disassemble(
+    def disassemble(  # noqa: PLR0912 — fans across 8 domains plus capabilities multi-file
         files: Mapping[str, bytes],
     ) -> tuple[dict[Domains, BaseModel], dict[str, object]]:
         per_domain: dict[Domains, BaseModel] = {}
@@ -160,6 +170,10 @@ class ClaudeAssembler:
             "prefersReducedMotion",
         }
         governance_keys = {"autoUpdatesChannel", "minimumVersion"}
+        # Capabilities keys that live in settings.json (the MCP keys live in
+        # ~/.claude.json — see below). The plugin/marketplace keys are added
+        # in P1-A; both are claimed by ``ClaudeCapabilitiesCodec``.
+        capabilities_settings_keys = {"enabledPlugins", "extraKnownMarketplaces"}
 
         identity_obj = {k: v for k, v in settings.items() if k in identity_keys}
         if identity_obj:
@@ -195,16 +209,28 @@ class ClaudeAssembler:
             | lifecycle_keys
             | interface_keys
             | governance_keys
+            | capabilities_settings_keys
         )
         for k, v in settings.items():
             if k not in claimed:
                 passthrough[k] = v
 
+        # Capabilities is unique: its keys span TWO files. The mcp_servers
+        # live in ~/.claude.json; the enabledPlugins / extraKnownMarketplaces
+        # live in settings.json. Both feed the same codec section.
         dotclaude_raw = files.get(ClaudeAssembler.DOTCLAUDE_JSON, b"{}")
         dotclaude = load_json(dotclaude_raw) or {}
+        capabilities_obj: dict[str, object] = {}
         if isinstance(dotclaude, dict) and "mcpServers" in dotclaude:
-            section_obj = {"mcpServers": dotclaude["mcpServers"]}
-            per_domain[Domains.CAPABILITIES] = ClaudeCapabilitiesSection.model_validate(section_obj)
+            capabilities_obj["mcpServers"] = dotclaude["mcpServers"]
+        if "enabledPlugins" in settings:
+            capabilities_obj["enabledPlugins"] = settings["enabledPlugins"]
+        if "extraKnownMarketplaces" in settings:
+            capabilities_obj["extraKnownMarketplaces"] = settings["extraKnownMarketplaces"]
+        if capabilities_obj:
+            per_domain[Domains.CAPABILITIES] = ClaudeCapabilitiesSection.model_validate(
+                capabilities_obj
+            )
 
         return per_domain, passthrough
 

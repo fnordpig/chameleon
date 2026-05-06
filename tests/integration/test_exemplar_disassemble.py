@@ -82,14 +82,15 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
     assert Domains.IDENTITY in domains
     assert Domains.INTERFACE in domains
     assert Domains.GOVERNANCE in domains
+    assert Domains.CAPABILITIES in domains, (
+        "P1-A claimed Codex's [plugins.*] and [marketplaces.*] tables; "
+        "the capabilities domain should now disassemble from this exemplar"
+    )
     # What the parity-gap doc explicitly notes as unclaimed and
-    # therefore SHOULD land in pass-through. If any of these starts
-    # disappearing from the pass-through set in the future, that means a
-    # codec started claiming them — at which point this test should be
-    # updated alongside the codec PR (intentional break, not regression).
+    # therefore SHOULD land in pass-through. ``marketplaces`` and ``plugins``
+    # used to be on this list; they were claimed by P1-A and are now in
+    # the capabilities domain (see assertion above).
     expected_passthrough = {
-        "marketplaces",
-        "plugins",
         "personality",
         "model_context_window",
         "model_auto_compact_token_limit",
@@ -100,3 +101,7 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
     assert not missing, (
         f"expected passthrough keys missing: {missing}; got passthrough={sorted(passthrough)}"
     )
+    # Conversely: ensure ``plugins`` / ``marketplaces`` are NOT in passthrough
+    # any more — the codec owns them now.
+    leaked = {"plugins", "marketplaces"} & set(passthrough)
+    assert not leaked, f"P1-A-claimed keys leaked to pass-through: {leaked}"
