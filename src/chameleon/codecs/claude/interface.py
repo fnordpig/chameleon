@@ -50,8 +50,15 @@ from chameleon.schema.interface import Interface, Voice, VoiceMode
 
 
 class _ClaudeStatusLine(BaseModel):
+    # F1 (Wave-7): the assembler dumps interface sections with
+    # ``exclude_defaults=True``, which previously stripped a
+    # ``type="command"`` default during round-trip — even when the
+    # exemplar literally shipped ``{"type": "command", ...}``. Default
+    # ``type`` to ``None`` and have the codec set it explicitly so the
+    # value survives ``exclude_defaults``-style serialisation. The
+    # documented schemastore wire shape always carries ``type``.
     model_config = ConfigDict(extra="allow")
-    type: str = "command"
+    type: str | None = None
     command: str | None = None
 
 

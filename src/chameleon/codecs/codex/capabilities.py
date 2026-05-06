@@ -64,11 +64,19 @@ class _CodexPluginEntry(BaseModel):
 class _CodexMarketplaceEntry(BaseModel):
     """The shape of a single ``[marketplaces.<name>]`` table.
 
-    ``last_updated`` and ``last_revision`` are operational state Codex writes
-    back to disk after each marketplace refresh — they belong to the target,
-    not to neutral. Per the design rationale, we leave them on this section
-    model so disassemble doesn't drop them on the floor; the codec stashes
-    them on per-target pass-through during ``from_target``.
+    ``source`` / ``source_type`` / ``ref`` are the codec-claimed fields —
+    they round-trip through the neutral ``PluginMarketplaceSource`` shape.
+
+    F2 (Wave-7): ``last_updated`` / ``last_revision`` / ``sparse_paths``
+    are Codex-side operational state that belongs to the target, not to
+    neutral. They are intentionally NOT modeled here — ``extra="allow"``
+    routes them into ``__pydantic_extra__`` on disassemble, and the
+    assembler's B1 extras-merge harvests them off the existing section
+    and splices them back into the freshly-built ``[marketplaces.<name>]``
+    table during ``assemble``. The recursion in
+    ``targets._protocol._walk_field_extras`` walks the dict-of-BaseModel
+    shape (``dict[str, _CodexMarketplaceEntry]``) and surfaces per-entry
+    extras at the right nesting depth.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -76,9 +84,6 @@ class _CodexMarketplaceEntry(BaseModel):
     source: str | None = None
     source_type: Literal["git", "local"] | None = None
     ref: str | None = None
-    last_updated: str | None = None
-    last_revision: str | None = None
-    sparse_paths: list[str] | None = None
 
 
 class CodexCapabilitiesSection(BaseModel):
@@ -226,10 +231,11 @@ def _codex_marketplace_to_neutral(
     """Map a Codex ``[marketplaces.<name>]`` table to neutral.
 
     ``last_updated`` / ``last_revision`` / ``sparse_paths`` are intentionally
-    DROPPED FROM NEUTRAL — they are Codex-side operational state. They
-    survive a re-derive via per-target pass-through (the assembler routes
-    raw ``marketplaces`` table through pass-through when they're present;
-    today the codec just emits a debug ``LossWarning`` for visibility).
+    DROPPED FROM NEUTRAL — they are Codex-side operational state and
+    are not modeled here. They land in ``__pydantic_extra__`` on
+    disassemble (via ``extra="allow"``) and are re-emitted by the
+    assembler's B1 extras-merge during ``assemble`` — see
+    ``_CodexMarketplaceEntry`` for the F2 mechanism.
     """
 
     if entry.source is None:
