@@ -219,6 +219,11 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
     pending = tx_store.entries()
     if pending:
         sys.stdout.write(f"transactions: {len(pending)} unresolved\n")
+        # Surface each stale marker's merge_id so an operator (or recovery
+        # tooling) can correlate the marker file with the per-target
+        # state-repo commit that recorded the same Merge-Id trailer.
+        for tx in pending:
+            sys.stdout.write(f"  stale tx: {tx.merge_id} started_at={tx.started_at.isoformat()}\n")
         return 1
     return 0 if not items else 1
 
