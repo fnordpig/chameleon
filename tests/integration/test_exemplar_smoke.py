@@ -190,12 +190,6 @@ def test_codex_tui_subtable_preserved(exemplar_env: dict[str, Path]) -> None:
     assert "model_availability_nux" in after, "[tui.model_availability_nux] sub-table was lost"
 
 
-@pytest.mark.xfail(
-    reason="B2: marketplace dict key ordering not stable across two "
-    "--on-conflict=keep merges. All keys preserved but byte-equality "
-    "breaks. See docs/superpowers/specs/2026-05-06-smoke-findings.md.",
-    strict=True,
-)
 def test_keep_merge_is_byte_idempotent(exemplar_env: dict[str, Path]) -> None:
     live_settings = exemplar_env["home"] / ".claude" / "settings.json"
     live_codex = exemplar_env["home"] / ".codex" / "config.toml"

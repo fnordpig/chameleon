@@ -187,14 +187,22 @@ def reconcile_plugins(
     ``PluginDisagreement`` list is the audit trail.
     """
 
-    union: dict[str, PluginEntry] = {}
     by_key: dict[str, dict[TargetId, bool]] = {}
     for tid, entries in per_target.items():
         for key, entry in entries.items():
             by_key.setdefault(key, {})[tid] = entry.enabled
 
+    # Iterate in sorted-key order so the produced union dict and the
+    # disagreement list are byte-stable across runs regardless of which
+    # target's reverse codec ran first. This is the B2 fix
+    # (docs/superpowers/specs/2026-05-06-smoke-findings.md): without it,
+    # a second ``chameleon merge --on-conflict=keep`` could shuffle key
+    # ordering inside ``extraKnownMarketplaces`` / ``[plugins.*]`` and
+    # break byte-equality even though no semantic content changed.
+    union: dict[str, PluginEntry] = {}
     disagreements: list[PluginDisagreement] = []
-    for key, target_values in by_key.items():
+    for key in sorted(by_key):
+        target_values = by_key[key]
         values = set(target_values.values())
         # Permissive union: any True wins, otherwise False.
         union[key] = PluginEntry(enabled=any(target_values.values()))

@@ -142,8 +142,16 @@ class ClaudeCapabilitiesCodec:
 
     @staticmethod
     def to_target(model: Capabilities, ctx: TranspileCtx) -> ClaudeCapabilitiesSection:
+        # B2 (docs/superpowers/specs/2026-05-06-smoke-findings.md): emit
+        # dict-keyed sub-tables in sorted-key order so the produced
+        # section — and any downstream JSON/TOML serialization — is
+        # byte-stable across runs. Without this, the order in which the
+        # engine populated ``model.plugins`` / ``plugin_marketplaces`` /
+        # ``mcp_servers`` (which depends on per-target reverse-codec
+        # iteration) leaks into ``settings.json``.
         section = ClaudeCapabilitiesSection()
-        for name, server in model.mcp_servers.items():
+        for name in sorted(model.mcp_servers):
+            server = model.mcp_servers[name]
             if isinstance(server, McpServerStdio):
                 section.mcpServers[name] = _ClaudeMcpServerStdio(
                     command=server.command,
@@ -156,16 +164,22 @@ class ClaudeCapabilitiesCodec:
                     bearer_token_env_var=server.bearer_token_env_var,
                     http_headers=dict(server.http_headers),
                 )
-        for plugin_key, entry in model.plugins.items():
-            section.enabled_plugins[plugin_key] = entry.enabled
-        for mp_name, mp in model.plugin_marketplaces.items():
-            section.extra_known_marketplaces[mp_name] = _claude_marketplace_from_neutral(mp)
+        for plugin_key in sorted(model.plugins):
+            section.enabled_plugins[plugin_key] = model.plugins[plugin_key].enabled
+        for mp_name in sorted(model.plugin_marketplaces):
+            section.extra_known_marketplaces[mp_name] = _claude_marketplace_from_neutral(
+                model.plugin_marketplaces[mp_name]
+            )
         return section
 
     @staticmethod
     def from_target(section: ClaudeCapabilitiesSection, ctx: TranspileCtx) -> Capabilities:
+        # B2: build neutral dicts in sorted-key order so cross-target
+        # reconciliation (and any subsequent re-derive) is independent of
+        # the order in which the live file happened to enumerate entries.
         servers: dict[str, McpServer] = {}
-        for name, raw in section.mcpServers.items():
+        for name in sorted(section.mcpServers):
+            raw = section.mcpServers[name]
             if isinstance(raw, _ClaudeMcpServerStdio):
                 servers[name] = McpServerStdio(
                     command=raw.command,
@@ -192,10 +206,12 @@ class ClaudeCapabilitiesCodec:
                     )
                 )
         plugins: dict[str, PluginEntry] = {
-            key: PluginEntry(enabled=enabled) for key, enabled in section.enabled_plugins.items()
+            key: PluginEntry(enabled=section.enabled_plugins[key])
+            for key in sorted(section.enabled_plugins)
         }
         marketplaces: dict[str, PluginMarketplace] = {}
-        for mp_name, mp in section.extra_known_marketplaces.items():
+        for mp_name in sorted(section.extra_known_marketplaces):
+            mp = section.extra_known_marketplaces[mp_name]
             neutral = _claude_marketplace_to_neutral(mp_name, mp, ctx)
             if neutral is not None:
                 marketplaces[mp_name] = neutral

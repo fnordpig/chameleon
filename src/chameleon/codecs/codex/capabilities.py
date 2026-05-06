@@ -98,8 +98,15 @@ class CodexCapabilitiesCodec:
 
     @staticmethod
     def to_target(model: Capabilities, ctx: TranspileCtx) -> CodexCapabilitiesSection:
+        # B2 (docs/superpowers/specs/2026-05-06-smoke-findings.md): emit
+        # dict-keyed sub-tables in sorted-key order so the produced
+        # section — and the resulting ``[mcp_servers.*]`` /
+        # ``[plugins.*]`` / ``[marketplaces.*]`` blocks in
+        # ``config.toml`` — are byte-stable across runs regardless of
+        # how the engine populated the neutral dict.
         section = CodexCapabilitiesSection()
-        for name, server in model.mcp_servers.items():
+        for name in sorted(model.mcp_servers):
+            server = model.mcp_servers[name]
             if isinstance(server, McpServerStdio):
                 section.mcp_servers[name] = _CodexMcpServerStdio(
                     command=server.command,
@@ -112,16 +119,23 @@ class CodexCapabilitiesCodec:
                     bearer_token_env_var=server.bearer_token_env_var,
                     http_headers=dict(server.http_headers),
                 )
-        for plugin_key, entry in model.plugins.items():
-            section.plugins[plugin_key] = _CodexPluginEntry(enabled=entry.enabled)
-        for mp_name, mp in model.plugin_marketplaces.items():
-            section.marketplaces[mp_name] = _codex_marketplace_from_neutral(mp_name, mp, ctx)
+        for plugin_key in sorted(model.plugins):
+            section.plugins[plugin_key] = _CodexPluginEntry(
+                enabled=model.plugins[plugin_key].enabled
+            )
+        for mp_name in sorted(model.plugin_marketplaces):
+            section.marketplaces[mp_name] = _codex_marketplace_from_neutral(
+                mp_name, model.plugin_marketplaces[mp_name], ctx
+            )
         return section
 
     @staticmethod
     def from_target(section: CodexCapabilitiesSection, ctx: TranspileCtx) -> Capabilities:
+        # B2: build neutral dicts in sorted-key order so cross-target
+        # reconciliation is order-independent.
         servers: dict[str, McpServer] = {}
-        for name, raw in section.mcp_servers.items():
+        for name in sorted(section.mcp_servers):
+            raw = section.mcp_servers[name]
             if isinstance(raw, _CodexMcpServerStdio):
                 servers[name] = McpServerStdio(
                     command=raw.command, args=list(raw.args), env=dict(raw.env)
@@ -143,10 +157,12 @@ class CodexCapabilitiesCodec:
                     )
                 )
         plugins: dict[str, PluginEntry] = {
-            key: PluginEntry(enabled=entry.enabled) for key, entry in section.plugins.items()
+            key: PluginEntry(enabled=section.plugins[key].enabled)
+            for key in sorted(section.plugins)
         }
         marketplaces: dict[str, PluginMarketplace] = {}
-        for mp_name, entry in section.marketplaces.items():
+        for mp_name in sorted(section.marketplaces):
+            entry = section.marketplaces[mp_name]
             neutral = _codex_marketplace_to_neutral(mp_name, entry, ctx)
             if neutral is not None:
                 marketplaces[mp_name] = neutral
