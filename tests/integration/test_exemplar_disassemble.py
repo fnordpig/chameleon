@@ -86,23 +86,24 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
         "P1-A claimed Codex's [plugins.*] and [marketplaces.*] tables; "
         "the capabilities domain should now disassemble from this exemplar"
     )
-    # What the parity-gap doc explicitly notes as unclaimed and
-    # therefore SHOULD land in pass-through. ``marketplaces`` and ``plugins``
-    # used to be on this list; they were claimed by P1-A and are now in
-    # the capabilities domain (see assertion above). ``personality`` was
-    # also on this list pre-P1-E; it is now claimed by the directives
-    # codec and lives in the directives domain.
-    expected_passthrough = {
-        "model_context_window",
-        "model_auto_compact_token_limit",
-        "model_catalog_json",
-        "approvals_reviewer",
-    }
+    # After Wave-4 the only Codex top-level key in the exemplar that is
+    # still unclaimed is ``approvals_reviewer`` (P1-G — sibling agent's
+    # branch, lands next). Once that merges, expected_passthrough becomes
+    # empty.
+    expected_passthrough = {"approvals_reviewer"}
     missing = expected_passthrough - set(passthrough)
     assert not missing, (
         f"expected passthrough keys missing: {missing}; got passthrough={sorted(passthrough)}"
     )
-    # Conversely: ensure ``plugins`` / ``marketplaces`` / ``personality``
-    # are NOT in passthrough any more — codecs own them now (P1-A, P1-E).
-    leaked = {"plugins", "marketplaces", "personality"} & set(passthrough)
+    # Conversely: pin the leak guard for every Codex key that's now claimed
+    # by a codec. Any of these reappearing in pass-through means the
+    # routing dispatch silently lost a claim.
+    leaked = {
+        "plugins",                          # P1-A
+        "marketplaces",                     # P1-A
+        "personality",                      # P1-E
+        "model_context_window",             # P1-F
+        "model_auto_compact_token_limit",   # P1-F
+        "model_catalog_json",               # P1-F
+    } & set(passthrough)
     assert not leaked, f"codec-claimed keys leaked to pass-through: {leaked}"

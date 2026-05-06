@@ -76,6 +76,16 @@ class Identity(BaseModel):
     thinking: bool | None = None
     service_tier: str | None = None
     context_window: int | None = Field(default=None, ge=1)
+    # P1-F — Codex-only identity tuning knobs (Claude has no analogue).
+    # Wire-name mapping (documented here, applied in CodexIdentityCodec):
+    #   compact_threshold   -> model_auto_compact_token_limit
+    #   model_catalog_path  -> model_catalog_json
+    # The neutral names use cross-target vocabulary (compact, threshold,
+    # path) rather than Codex's wire jargon. When set with the Claude codec
+    # active, ClaudeIdentityCodec.to_target emits a P1-F LossWarning per
+    # field instead of silently dropping them.
+    compact_threshold: int | None = Field(default=None, ge=1)
+    model_catalog_path: str | None = None
     model: IdentityModel | None = Field(
         default=None,
         description=(
