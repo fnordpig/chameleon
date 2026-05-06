@@ -24,7 +24,7 @@ class _CodexProject(BaseModel):
 
 
 class CodexGovernanceSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     features: dict[str, bool] = Field(default_factory=dict)
     projects: dict[str, _CodexProject] = Field(default_factory=dict)
 

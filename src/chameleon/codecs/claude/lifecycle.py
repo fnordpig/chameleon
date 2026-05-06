@@ -101,7 +101,7 @@ class ClaudeHooksSection(BaseModel):
 
 
 class ClaudeLifecycleSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     cleanupPeriodDays: int | None = None  # noqa: N815
     hooks: ClaudeHooksSection | None = None
 

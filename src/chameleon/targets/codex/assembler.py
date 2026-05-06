@@ -9,8 +9,8 @@ V0 owns:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import ClassVar
+from collections.abc import Mapping, MutableMapping
+from typing import ClassVar, cast
 
 import tomlkit
 from pydantic import BaseModel
@@ -28,7 +28,11 @@ from chameleon.codecs.codex.interface import CodexInterfaceSection
 from chameleon.codecs.codex.lifecycle import CodexLifecycleSection
 from chameleon.io.toml import dump_toml, load_toml
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
-from chameleon.targets._protocol import safe_validate_section
+from chameleon.targets._protocol import (
+    harvest_section_extras,
+    merge_extras_into_dict,
+    safe_validate_section,
+)
 
 
 class CodexAssembler:
@@ -158,7 +162,55 @@ class CodexAssembler:
             if k not in doc:
                 doc[k] = v
 
+        # B1 — sub-table preservation. For each domain section a codec
+        # produced, look up the matching section in the (raw) existing
+        # disassemble and recover any unclaimed inner keys parked in
+        # ``__pydantic_extra__`` (the section models all carry
+        # ``ConfigDict(extra="allow")``). Merge those extras back onto
+        # the doc at the corresponding top-level key so partially-
+        # claimed nested tables (e.g. ``[tui]`` with unclaimed
+        # ``status_line`` and ``[tui.model_availability_nux]``) round-trip
+        # losslessly.
+        if existing is not None and existing.get(CodexAssembler.CONFIG_TOML):
+            existing_domains, _ = CodexAssembler.disassemble(existing)
+            CodexAssembler._merge_existing_extras(doc, existing_domains)
+
         return {CodexAssembler.CONFIG_TOML: dump_toml(doc).encode("utf-8")}
+
+    @staticmethod
+    def _merge_existing_extras(
+        doc: object,
+        existing_domains: Mapping[Domains, BaseModel],
+    ) -> None:
+        """Merge unclaimed sub-keys harvested from ``existing_domains``
+        onto ``doc`` (a tomlkit document, which is dict-shaped).
+
+        Each Codex codec section's field names align 1:1 with the
+        top-level TOML keys the assembler emits — there is no domain-
+        specific renaming on the way in or out (e.g.
+        ``CodexInterfaceSection.tui`` ↔ ``[tui]``;
+        ``CodexInterfaceSection.file_opener`` ↔ ``file_opener``;
+        ``CodexAuthorizationSection.sandbox_workspace_write`` ↔
+        ``[sandbox_workspace_write]``). The merge therefore is a single
+        recursive splice of harvested extras into the doc — no per-
+        domain routing required.
+
+        ``merge_extras_into_dict`` honours the "modelled wins" rule:
+        the codec's freshly-built TOML keys are kept verbatim; only
+        unclaimed inner keys (and any unclaimed top-level table the
+        codec didn't emit at all) are filled in from extras.
+        """
+        # tomlkit Document is dict-shaped; cast through MutableMapping's
+        # invariant generics — at runtime the keys are str by virtue of
+        # the TOML grammar.
+        if not isinstance(doc, MutableMapping):  # pragma: no cover
+            return
+        target = cast("MutableMapping[str, object]", doc)
+
+        for _domain, section in existing_domains.items():
+            extras = harvest_section_extras(section)
+            if extras:
+                merge_extras_into_dict(target, extras)
 
     @staticmethod
     def disassemble(

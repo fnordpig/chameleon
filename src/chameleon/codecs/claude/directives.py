@@ -63,7 +63,7 @@ from chameleon.schema.directives import Directives
 
 
 class ClaudeAttribution(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     commit: str | None = None
     pr: str | None = None
 

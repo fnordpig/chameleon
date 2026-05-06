@@ -28,7 +28,7 @@ from chameleon.schema.identity import Identity, ReasoningEffort
 
 
 class CodexIdentitySection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     model: str | None = None
     model_reasoning_effort: str | None = None
     # P1-F — Codex-only identity tuning knobs. Field names mirror the

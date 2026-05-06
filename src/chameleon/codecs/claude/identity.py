@@ -35,7 +35,7 @@ class ClaudeIdentitySection(BaseModel):
     Pydantic, never via raw dict access.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     model: str | None = None
     effortLevel: str | None = None  # noqa: N815  -- mirrors upstream JSON key

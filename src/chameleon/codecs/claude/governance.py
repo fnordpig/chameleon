@@ -13,7 +13,7 @@ from chameleon.schema.governance import Governance, Updates, UpdatesChannel
 
 
 class ClaudeGovernanceSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     autoUpdatesChannel: str | None = None  # noqa: N815
     minimumVersion: str | None = None  # noqa: N815
 

@@ -16,12 +16,16 @@ from chameleon.schema.environment import Environment
 
 
 class _CodexShellEnvPolicy(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # ``extra="allow"`` (B1) — Codex's shell_environment_policy supports
+    # additional knobs (e.g. ``ignore_default_excludes``,
+    # ``include_only``) that we don't model in V0; preserve them through
+    # round-trip via ``__pydantic_extra__``.
+    model_config = ConfigDict(extra="allow")
     set: dict[str, str] = Field(default_factory=dict)
 
 
 class CodexEnvironmentSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     shell_environment_policy: _CodexShellEnvPolicy = Field(default_factory=_CodexShellEnvPolicy)
 
 

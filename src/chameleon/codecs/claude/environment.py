@@ -13,7 +13,7 @@ from chameleon.schema.environment import Environment
 
 
 class ClaudeEnvironmentSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     env: dict[str, str] = Field(default_factory=dict)
 
 

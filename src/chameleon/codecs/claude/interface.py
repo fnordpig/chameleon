@@ -71,7 +71,10 @@ class _ClaudeVoice(BaseModel):
 
 
 class ClaudeInterfaceSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # ``extra="allow"`` (B1) — unclaimed top-level keys round-trip
+    # through ``__pydantic_extra__`` and are re-emitted by the
+    # assembler.
+    model_config = ConfigDict(extra="allow")
     tui: str | None = None
     statusLine: _ClaudeStatusLine = Field(default_factory=_ClaudeStatusLine)  # noqa: N815
     voice: _ClaudeVoice | None = None
