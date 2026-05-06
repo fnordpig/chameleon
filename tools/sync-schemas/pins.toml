@@ -1,0 +1,21 @@
+# Pinned upstream refs for vendored schemas.
+# Bumping these is an explicit reviewable PR (§8.4); the build never
+# refreshes implicitly.
+
+[claude]
+# schemastore.org's claude-code-settings.json is updated frequently.
+# Pin a specific commit SHA to make regeneration reproducible.
+source = "https://raw.githubusercontent.com/SchemaStore/schemastore/{git_sha}/src/schemas/json/claude-code-settings.json"
+git_sha = "REPLACE_WITH_ACTUAL_SHA_AT_FIRST_RUN"
+vendored_at = "tools/sync-schemas/upstream/claude.schema.json"
+
+[codex]
+# Codex's config types live in codex-rs/config/src/config_toml.rs (the
+# ConfigToml struct, deriving schemars::JsonSchema). The Rust binary in
+# tools/sync-schemas/codex/ depends on codex-rs as a git dependency at
+# this pin and dumps the schema for ConfigToml on stdout.
+git_url = "https://github.com/openai/codex.git"
+git_sha = "REPLACE_WITH_ACTUAL_SHA_AT_FIRST_RUN"
+config_struct = "ConfigToml"
+config_crate_path = "codex-rs/config"
+vendored_at = "tools/sync-schemas/upstream/codex.schema.json"
