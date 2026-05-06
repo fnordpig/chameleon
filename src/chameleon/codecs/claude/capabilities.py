@@ -9,7 +9,7 @@ assembler is what splits across files.
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -25,10 +25,16 @@ from chameleon.schema.capabilities import (
 
 
 class _ClaudeMcpServerStdio(BaseModel):
-    """Claude's user-level mcpServers entry shape (stdio variant)."""
+    """Claude's user-level mcpServers entry shape (stdio variant).
+
+    The `type` field is the on-disk discriminator real `~/.claude.json`
+    entries carry; without it modelled here, `extra="forbid"` would
+    reject every modern Claude config (parity-gap.md P0-1).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    type: Literal["stdio"] = "stdio"
     command: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
@@ -37,12 +43,19 @@ class _ClaudeMcpServerStdio(BaseModel):
 class _ClaudeMcpServerHttp(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    type: Literal["http"] = "http"
     url: str
     bearer_token_env_var: str | None = None
     http_headers: dict[str, str] = Field(default_factory=dict)
 
 
-_ClaudeMcpServer = _ClaudeMcpServerStdio | _ClaudeMcpServerHttp
+# Discriminated by the on-disk `type` tag. Without `Field(discriminator=...)`,
+# pydantic tries each branch in turn and surfaces the union of all branch
+# errors — the misleading multi-error output in parity-gap.md P0-1.
+_ClaudeMcpServer = Annotated[
+    _ClaudeMcpServerStdio | _ClaudeMcpServerHttp,
+    Field(discriminator="type"),
+]
 
 
 class ClaudeCapabilitiesSection(BaseModel):
