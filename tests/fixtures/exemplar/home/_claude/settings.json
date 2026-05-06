@@ -1,0 +1,146 @@
+{
+  "includeCoAuthoredBy": false,
+  "permissions": {
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(*)",
+      "WebSearch",
+      "WebFetch",
+      "mcp__*"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rtk hook claude"
+          }
+        ]
+      }
+    ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "bash ~/.claude/statusline-command.sh"
+  },
+  "enabledPlugins": {
+    "superpowers@claude-plugins-official": true,
+    "claude-code-setup@claude-plugins-official": true,
+    "code-simplifier@claude-plugins-official": true,
+    "commit-commands@claude-plugins-official": true,
+    "claude-md-management@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true,
+    "context7@claude-plugins-official": true,
+    "document-skills@anthropic-agent-skills": true,
+    "superpowers@superpowers-marketplace": true,
+    "astral@astral-sh": true,
+    "rust-analyzer@claude-code-lsps": false,
+    "rust-analyzer-lsp@claude-plugins-official": false,
+    "typescript-lsp@claude-plugins-official": true,
+    "bash-language-server@claude-code-lsps": false,
+    "yaml-language-server@claude-code-lsps": true,
+    "superpowers-developing-for-claude-code@superpowers-marketplace": true,
+    "plugin-dev@claude-plugins-official": true,
+    "example-org-plugin-creator-typo@example-user-plugins": false,
+    "tracemeld@example-user-plugins": true,
+    "plannotator@plannotator": true,
+    "bash-lsp@zircote-lsp": false,
+    "cpp-lsp@zircote-lsp": true,
+    "dockerfile-lsp@zircote-lsp": false,
+    "json-lsp@zircote-lsp": true,
+    "lsp-tools@zircote-lsp": true,
+    "markdown-lsp@zircote-lsp": true,
+    "python-lsp@zircote-lsp": false,
+    "sql-lsp@zircote-lsp": false,
+    "terraform-lsp@zircote-lsp": true,
+    "yaml-lsp@zircote-lsp": true,
+    "rust-lsp@zircote-lsp": false,
+    "ripvec@example-user-plugins": true,
+    "aws-common@aws-skills": true,
+    "jdtls@claude-code-lsps": true,
+    "java-lsp@zircote-lsp": false,
+    "github@claude-plugins-official": false,
+    "example-org-federation@example-org-marketplace": true,
+    "example-org-plugin-creator@example-org-marketplace": true,
+    "example-org-admin@example-org-marketplace": true,
+    "github-hacks@example-org-marketplace": true,
+    "example-org-aws@example-org-marketplace": true,
+    "example-org-doc-tools@example-org-marketplace": true,
+    "example-org-workflow@example-org-marketplace": true,
+    "code-review@claude-plugins-official": true
+  },
+  "extraKnownMarketplaces": {
+    "example-user-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "example-user/example-user-plugins"
+      },
+      "autoUpdate": true
+    },
+    "astral-sh": {
+      "source": {
+        "source": "github",
+        "repo": "astral-sh/claude-code-plugins"
+      }
+    },
+    "claude-code-lsps": {
+      "source": {
+        "source": "github",
+        "repo": "boostvolt/claude-code-lsps"
+      }
+    },
+    "plannotator": {
+      "source": {
+        "source": "github",
+        "repo": "backnotprop/plannotator"
+      }
+    },
+    "zircote-lsp": {
+      "source": {
+        "source": "github",
+        "repo": "zircote/lsp-marketplace"
+      },
+      "autoUpdate": true
+    },
+    "antonbabenko": {
+      "source": {
+        "source": "github",
+        "repo": "antonbabenko/terraform-skill"
+      }
+    },
+    "aws-skills": {
+      "source": {
+        "source": "github",
+        "repo": "zxkane/aws-skills"
+      }
+    },
+    "example-org-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "example-org/example-org-marketplace"
+      },
+      "autoUpdate": true
+    },
+    "superpowers-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "obra/superpowers-marketplace"
+      }
+    }
+  },
+  "effortLevel": "high",
+  "voice": {
+    "enabled": false,
+    "mode": "hold"
+  },
+  "voiceEnabled": false,
+  "coauthoredBy": false,
+  "gitAttribution": false
+}

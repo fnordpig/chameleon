@@ -1,0 +1,184 @@
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+approvals_reviewer = "guardian_subagent"
+personality = "pragmatic"
+model_context_window = 600000
+model_auto_compact_token_limit = 540000
+model_catalog_json = "/Users/exampleuser/.codex/model-catalog-600k.json"
+
+[tui]
+status_line = ["model-with-reasoning", "current-dir", "context-used", "five-hour-limit", "weekly-limit", "context-window-size", "used-tokens", "thread-title"]
+
+[tui.model_availability_nux]
+"gpt-5.5" = 4
+
+[marketplaces.example-org-marketplace]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "git@github-example-org:example-org/example-org-marketplace.git"
+
+[marketplaces.example-user-plugins]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/example-user/example-user-plugins.git"
+
+[marketplaces.antonbabenko]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/antonbabenko/terraform-skill.git"
+
+[marketplaces.astral-sh]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/astral-sh/claude-code-plugins.git"
+
+[marketplaces.aws-skills]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/zxkane/aws-skills.git"
+
+[marketplaces.claude-code-lsps]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/boostvolt/claude-code-lsps.git"
+
+[marketplaces.plannotator]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/backnotprop/plannotator.git"
+
+[marketplaces.superpowers-marketplace]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/obra/superpowers-marketplace.git"
+
+[marketplaces.zircote-lsp]
+last_updated = "2026-01-01T00:00:00Z"
+last_revision = "0000000000000000000000000000000000000000"
+source_type = "git"
+source = "https://github.com/zircote/lsp-marketplace.git"
+
+[plugins."example-org-admin@example-org-marketplace"]
+enabled = true
+
+[plugins."example-org-aws@example-org-marketplace"]
+enabled = true
+
+[plugins."example-org-ci@example-org-marketplace"]
+enabled = true
+
+[plugins."example-org-doc-tools@example-org-marketplace"]
+enabled = true
+
+[plugins."example-org-federation@example-org-marketplace"]
+enabled = true
+
+[plugins."example-org-plugin-creator@example-org-marketplace"]
+enabled = true
+
+[plugins."example-org-workflow@example-org-marketplace"]
+enabled = true
+
+[plugins."ripvec@example-user-plugins"]
+enabled = true
+
+[plugins."superpowers@openai-curated"]
+enabled = true
+
+[plugins."tracemeld@example-user-plugins"]
+enabled = true
+
+[plugins."astral@astral-sh"]
+enabled = true
+
+[plugins."aws-common@aws-skills"]
+enabled = true
+
+[plugins."claude-code-setup@openai-curated"]
+enabled = true
+
+[plugins."claude-md-management@openai-curated"]
+enabled = true
+
+[plugins."code-review@openai-curated"]
+enabled = true
+
+[plugins."code-simplifier@openai-curated"]
+enabled = true
+
+[plugins."commit-commands@openai-curated"]
+enabled = true
+
+[plugins."context7@openai-curated"]
+enabled = true
+
+[plugins."cpp-lsp@zircote-lsp"]
+enabled = true
+
+[plugins."github-hacks@example-org-marketplace"]
+enabled = true
+
+[plugins."jdtls@claude-code-lsps"]
+enabled = true
+
+[plugins."json-lsp@zircote-lsp"]
+enabled = true
+
+[plugins."lsp-tools@zircote-lsp"]
+enabled = true
+
+[plugins."markdown-lsp@zircote-lsp"]
+enabled = true
+
+[plugins."plannotator@plannotator"]
+enabled = true
+
+[plugins."plugin-dev@openai-curated"]
+enabled = true
+
+[plugins."skill-creator@openai-curated"]
+enabled = true
+
+[plugins."superpowers-developing-for-claude-code@superpowers-marketplace"]
+enabled = true
+
+[plugins."terraform-lsp@zircote-lsp"]
+enabled = true
+
+[plugins."typescript-lsp@openai-curated"]
+enabled = true
+
+[plugins."yaml-language-server@claude-code-lsps"]
+enabled = true
+
+[plugins."yaml-lsp@zircote-lsp"]
+enabled = true
+
+[projects."/Users/exampleuser/src/example-org-typo/example-org-dotfiles"]
+trust_level = "trusted"
+
+[projects."/Users/exampleuser/src/openai/codex"]
+trust_level = "trusted"
+
+[projects."/Users/exampleuser/src/mine/ripvec"]
+trust_level = "trusted"
+
+[projects."/Users/exampleuser/src/mine/example-user-plugins"]
+trust_level = "trusted"
+
+[projects."/Users/exampleuser/src/ripvec"]
+trust_level = "trusted"
+
+[projects."/Users/exampleuser/src/example-org-typo/cloud-dev-environments"]
+trust_level = "trusted"
+
+[projects."/Users/exampleuser/src/openai/whatcable"]
+trust_level = "trusted"
