@@ -29,7 +29,7 @@ invocations are anti-patterns. Use:
 
 ## Verification gates
 
-Before claiming any task complete, ALL four must pass:
+Before claiming any task complete, ALL four must pass locally:
 
 1. `uv run ruff check`
 2. `uv run ruff format --check`
@@ -39,6 +39,18 @@ Before claiming any task complete, ALL four must pass:
 The `tests/typing_audit.py` test enforces the "everything is typed —
 no strings" rule. Do not weaken it; if it fires, fix the production
 code, not the test.
+
+The same four gates run in GitHub Actions on every push and pull
+request (`.github/workflows/ci.yml`) on a `{ubuntu, macos} × {3.12,
+3.13}` matrix. A green local run is necessary but not sufficient —
+matrix differences (filesystem casing, line endings, Python minor
+behaviour) are caught by CI. Wait for the matrix before merging.
+
+CI does **not** run `tools/sync-schemas/`. Refreshing the
+upstream-canonized schemas is a deliberate operator action; the
+`_generated.py` artefacts are vendored. If you bump
+`tools/sync-schemas/pins.toml`, regenerate locally and commit the
+artefact in the same PR.
 
 ## Search tooling
 
