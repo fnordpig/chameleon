@@ -72,11 +72,17 @@ class MergeEngine:
         self.tx_store = TransactionStore(paths.tx_dir)
 
     def _read_live_files(self, target_cls: type[Target]) -> dict[str, bytes]:
-        """Read a target's live config files into a dict keyed by repo_path."""
+        """Read a target's live config files into a dict keyed by repo_path.
+
+        Files that don't exist are omitted from the result (rather than
+        mapped to empty bytes), so disassembler-side `load_json("{}")`
+        defaults take effect.
+        """
         out: dict[str, bytes] = {}
         for spec in target_cls.assembler.files:
             live = Path(os.path.expanduser(spec.live_path))
-            out[spec.repo_path] = live.read_bytes() if live.exists() else b""
+            if live.exists():
+                out[spec.repo_path] = live.read_bytes()
         return out
 
     def _ensure_state_repo(self, target_id: TargetId) -> GitRepo:
