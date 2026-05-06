@@ -57,7 +57,7 @@ packages = ["src/chameleon"]
 line-length = 100
 target-version = "py312"
 src = ["src", "tests"]
-extend-exclude = ["src/chameleon/codecs/*/_generated.py"]
+extend-exclude = ["src/chameleon/codecs/*/_generated.py", "tools/sync-schemas/"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "PT", "PL", "N"]
