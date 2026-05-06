@@ -19,6 +19,10 @@ from pydantic import (
     model_validator,
 )
 
+# Sentinel used by TargetId._coerce_from_str_or_targetid to recognize when
+# Pydantic re-passes a TargetId instance back into model_validate (e.g. via
+# dict-key coercion); we accept the bare value rather than wrapping again.
+
 # ------------------------------------------------------------------
 # JsonValue — recursive scalar/list/dict type for unstructured payloads
 # ------------------------------------------------------------------
@@ -76,6 +80,18 @@ class TargetId(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     value: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_from_str_or_targetid(cls, data: object) -> object:
+        # Allow bare-string construction (TargetId("claude")) and YAML/JSON
+        # mapping-key resolution (where Pydantic hands us str keys for
+        # dict[TargetId, V] fields).
+        if isinstance(data, str):
+            return {"value": data}
+        if isinstance(data, TargetId):
+            return {"value": data.value}
+        return data
 
     @field_validator("value")
     @classmethod

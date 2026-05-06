@@ -1,0 +1,47 @@
+schema_version: 1
+
+identity:
+  reasoning_effort: high
+  thinking: true
+  model:
+    claude: claude-sonnet-4-7
+    codex: gpt-5.4
+  endpoint:
+    base_url:
+      claude: https://api.anthropic.com
+      codex: https://api.openai.com
+
+directives:
+  system_prompt_file: ~/.config/chameleon/AGENTS.md
+  commit_attribution: "Generated with Chameleon"
+
+capabilities:
+  mcp_servers:
+    memory:
+      transport: stdio
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-memory"
+
+environment:
+  variables:
+    CI: "true"
+
+profiles:
+  deep-review:
+    identity:
+      reasoning_effort: high
+      model:
+        claude: claude-opus-4-7
+        codex: gpt-5-pro
+
+targets:
+  claude:
+    items:
+      voice:
+        enabled: true
+        mode: tap
+  codex:
+    items:
+      personality: pragmatic
