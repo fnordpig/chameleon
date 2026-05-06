@@ -41,15 +41,21 @@ from chameleon.targets._protocol import Target
 from chameleon.targets._registry import TargetRegistry
 
 
-def _resolve_parent(root: BaseModel, segments: tuple[str, ...]) -> BaseModel:
+def _resolve_parent(root: BaseModel, segments: tuple[str, ...]) -> BaseModel | None:
     """Walk to the parent node of the leaf identified by ``segments``.
 
-    Each intermediate segment must name a Pydantic field whose value is
-    itself a ``BaseModel``; raises ``AttributeError`` otherwise. The
-    leaf segment is *not* descended into — caller does the final get/set.
+    Each intermediate segment names a Pydantic field. If any intermediate
+    field's value is ``None`` (e.g. an ``Optional[BaseModel]`` that was
+    never authored — like ``interface.voice`` when the operator hasn't
+    set up voice configuration), this returns ``None``. Callers must
+    handle that case: ``_read_leaf`` returns ``None``; ``_write_leaf``
+    materializes the default-constructed intermediate model in place,
+    then re-resolves.
     """
-    node: BaseModel = root
+    node: BaseModel | None = root
     for seg in segments[:-1]:
+        if node is None:
+            return None
         node = getattr(node, seg)
     return node
 
@@ -65,9 +71,12 @@ def _read_leaf(
     ``target_key`` indexes into a ``dict[TargetId, V]``; ``dict_key`` indexes
     into a ``dict[str, V]`` (issue #44 — see ``merge/changeset.py`` module
     docstring). The two are mutually exclusive — the walker emits exactly
-    one of them per record.
+    one of them per record. An unset Optional[BaseModel] anywhere on the
+    path resolves to ``None`` for the leaf.
     """
     parent = _resolve_parent(root, segments)
+    if parent is None:
+        return None
     leaf = getattr(parent, segments[-1])
     if target_key is not None:
         if not isinstance(leaf, dict):
@@ -78,6 +87,43 @@ def _read_leaf(
             return None
         return leaf.get(dict_key)
     return leaf
+
+
+def _materialize_intermediate_models(root: BaseModel, segments: tuple[str, ...]) -> BaseModel:
+    """Walk ``segments`` (excluding leaf) and instantiate any ``None``
+    intermediate ``Optional[BaseModel]`` field with its default-constructed
+    submodel, in place. Returns the parent of the leaf, now non-None.
+
+    Used by ``_write_leaf`` so we can write under previously-unset nested
+    models (e.g. set ``interface.voice.enabled`` when ``interface.voice``
+    was ``None``). Each materialization uses the field's annotation, walking
+    through ``X | None`` unions to find the first ``BaseModel`` subclass.
+    """
+    node: BaseModel = root
+    for seg in segments[:-1]:
+        next_node = getattr(node, seg)
+        if next_node is None:
+            field = type(node).model_fields[seg]
+            anno = field.annotation
+            inner_cls: type[BaseModel] | None = None
+            if isinstance(anno, type) and issubclass(anno, BaseModel):
+                inner_cls = anno
+            else:
+                # Walk Optional[X] / X | None / Union[X, ...] to find a BaseModel.
+                for arg in getattr(anno, "__args__", ()):
+                    if isinstance(arg, type) and issubclass(arg, BaseModel):
+                        inner_cls = arg
+                        break
+            if inner_cls is None:
+                msg = (
+                    f"cannot materialize intermediate {seg!r}: annotation "
+                    f"{anno!r} has no BaseModel arm"
+                )
+                raise TypeError(msg)
+            next_node = inner_cls()
+            setattr(node, seg, next_node)
+        node = next_node
+    return node
 
 
 def _write_leaf(
@@ -94,7 +140,7 @@ def _write_leaf(
     same rule applies to ``dict_key`` (issue #44): we mutate just that
     str-keyed entry, leaving sibling keys untouched.
     """
-    parent = _resolve_parent(root, segments)
+    parent = _materialize_intermediate_models(root, segments)
     leaf_name = segments[-1]
     if target_key is None and dict_key is None:
         setattr(parent, leaf_name, value)

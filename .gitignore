@@ -16,3 +16,4 @@ htmlcov/
 target/
 # Auto-managed codex-rs checkout for sync-schemas/sync.py codex
 vendor/
+.claude/worktrees/

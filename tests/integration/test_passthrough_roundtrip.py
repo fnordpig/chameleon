@@ -92,13 +92,14 @@ def test_passthrough_survives_deleted_live_file(
     paths = _setup_env(monkeypatch, tmp_path)
 
     # Pre-seed a live ~/.claude/settings.json with a key Chameleon doesn't
-    # claim. ``voice`` (the object, P1-C in parity-gap.md) is still
-    # unclaimed — only the ``voiceEnabled`` boolean is. When P1-C lands,
-    # swap to whichever key remains unclaimed at that time.
+    # claim. Wave-3 closed the last unclaimed real-world Claude key (voice
+    # → P1-C); use a synthetic key that's definitely not claimed by any
+    # codec. The pass-through bag is the explicit escape hatch for keys
+    # that don't have a neutral concept yet — exactly the use-case here.
     live_settings = paths["home"] / ".claude" / "settings.json"
     live_settings.parent.mkdir(parents=True, exist_ok=True)
     live_settings.write_text(
-        '{"voice": {"enabled": false, "mode": "hold"}}\n',
+        '{"someUnknownFutureKey": {"hello": "world"}}\n',
         encoding="utf-8",
     )
 
@@ -115,8 +116,9 @@ def test_passthrough_survives_deleted_live_file(
     n = Neutral.model_validate(neutral_doc_obj)
     claude_bag = n.targets.get(BUILTIN_CLAUDE)
     assert claude_bag is not None, "neutral missing targets.claude after first merge"
-    assert "voice" in claude_bag.items, (
-        f"expected voice in neutral.targets.claude.items; got items={claude_bag.items!r}"
+    assert "someUnknownFutureKey" in claude_bag.items, (
+        f"expected someUnknownFutureKey in neutral.targets.claude.items; "
+        f"got items={claude_bag.items!r}"
     )
 
     # Operator deletes the live file (e.g. machine wipe / fresh install).
@@ -130,7 +132,7 @@ def test_passthrough_survives_deleted_live_file(
     assert cli.main(["merge", "--on-conflict=fail"]) == 0
     assert live_settings.exists()
     settings = load_json(live_settings)
-    assert "voice" in settings, (
+    assert "someUnknownFutureKey" in settings, (
         f"unclaimed key was lost on re-derive from neutral alone; got {settings!r}"
     )
-    assert settings["voice"] == {"enabled": False, "mode": "hold"}
+    assert settings["someUnknownFutureKey"] == {"hello": "world"}
