@@ -40,6 +40,33 @@ class TestTargetId:
         assert TargetId(value="eq") == TargetId(value="eq")
 
 
+class TestRegisterTargetId:
+    def test_rejects_empty_name(self) -> None:
+        with pytest.raises(ValueError, match="alphanumeric"):
+            register_target_id("")
+
+    def test_rejects_leading_separator(self) -> None:
+        with pytest.raises(ValueError, match="alphanumeric"):
+            register_target_id("-claude")
+
+    def test_rejects_trailing_separator(self) -> None:
+        with pytest.raises(ValueError, match="alphanumeric"):
+            register_target_id("claude-")
+
+    def test_rejects_invalid_chars(self) -> None:
+        with pytest.raises(ValueError, match="alphanumeric"):
+            register_target_id("claude/x")
+
+    def test_accepts_single_char(self) -> None:
+        register_target_id("x")  # should not raise
+
+    def test_accepts_interior_separators(self) -> None:
+        register_target_id("claude-code-1")  # should not raise
+
+    def test_accepts_underscores(self) -> None:
+        register_target_id("my_target")  # should not raise
+
+
 class TestFieldPath:
     def test_field_path_is_a_tuple(self) -> None:
         p = FieldPath(segments=("permissions", "allow"))

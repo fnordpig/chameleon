@@ -7,6 +7,7 @@ FileFormat / FileOwnership are closed enums; FileSpec is the typed
 record that assemblers use to declare which on-disk files they own.
 """
 
+import re
 from enum import Enum
 from typing import NamedTuple
 
@@ -38,15 +39,22 @@ type JsonValue = None | bool | int | float | str | list[JsonValue] | dict[str, J
 # directly.
 _TARGET_REGISTRY: set[str] = set()
 
+# Regex for valid target names: start and end with alphanumeric,
+# interior characters may be alphanumeric, hyphen, or underscore.
+# Also allows single-character names.
+_VALID_TARGET_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*[A-Za-z0-9]$|^[A-Za-z0-9]$")
+
 
 def register_target_id(name: str) -> None:
     """Register a target name as valid for `TargetId` construction.
 
     Called at startup by the targets registry (registries-and-target-protocol
-    task) and by tests. Idempotent.
+    task) and by tests. Idempotent. Names must start AND end with an
+    alphanumeric character; interior characters may be alphanumeric, hyphen,
+    or underscore.
     """
-    if not name or not name.replace("-", "").replace("_", "").isalnum():
-        msg = f"target name must be alphanumeric (with - or _); got {name!r}"
+    if not _VALID_TARGET_NAME.match(name):
+        msg = f"target name must be alphanumeric (interior `-` or `_` allowed); got {name!r}"
         raise ValueError(msg)
     _TARGET_REGISTRY.add(name)
 
@@ -81,9 +89,6 @@ class TargetId(BaseModel):
             )
             raise ValueError(msg)
         return v
-
-    def __hash__(self) -> int:
-        return hash(self.value)
 
     def __str__(self) -> str:
         return self.value
