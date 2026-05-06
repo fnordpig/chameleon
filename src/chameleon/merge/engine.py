@@ -13,14 +13,16 @@ V0 implements a simplified version of the full §4.3 pipeline:
 
 from __future__ import annotations
 
+import hashlib
 import os
 import types
 import typing
+from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from chameleon._types import TargetId
+from chameleon._types import FileOwnership, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge._diffs import FileDiff
@@ -37,6 +39,7 @@ from chameleon.schema.passthrough import PassThroughBag
 from chameleon.state.git import GitRepo
 from chameleon.state.paths import StatePaths
 from chameleon.state.transaction import (
+    MergeTransaction,
     TransactionStore,
     transaction_id,
 )
@@ -604,6 +607,50 @@ class MergeEngine:
                 diffs=diffs,
             )
 
+        # 7b. Recovery marker (§4.6).
+        #
+        # Before mutating any live target file, persist a `MergeTransaction`
+        # describing what we are about to do. The marker captures:
+        #
+        #   - the LKG hash we INTEND to land (the YAML hash of `composed`),
+        #     so a recovery path can compare current LKG against intent and
+        #     decide "did the LKG update step run?";
+        #   - the pre-merge SHAs of every PARTIAL-ownership live file, so a
+        #     recovery path can decide "did the partial-owned write actually
+        #     land what we intended?" by re-reading and re-hashing.
+        #
+        # On dry-run we do NOT touch tx_store at all (the early-return above
+        # already short-circuits). On any exception during the live-write or
+        # state-repo loop, the marker remains on disk and `chameleon doctor`
+        # surfaces it. On success the marker — and any pre-existing stale
+        # markers from previous interrupted runs — is cleared, because a
+        # clean merge means those interruptions have been resolved.
+        composed_dict = composed.model_dump(mode="json", exclude_none=False)
+        composed_yaml = dump_yaml(composed_dict)
+        target_ids_in_play: list[TargetId] = [
+            tid for tid in target_outputs if self.targets.get(tid) is not None
+        ]
+        partial_owned_hashes: dict[str, str] = {}
+        for tid in target_ids_in_play:
+            target_cls = self.targets.get(tid)
+            if target_cls is None:
+                continue
+            for spec in target_cls.assembler.files:
+                if spec.ownership is not FileOwnership.PARTIAL:
+                    continue
+                live = Path(os.path.expanduser(spec.live_path))
+                pre_bytes = live.read_bytes() if live.exists() else b""
+                partial_owned_hashes[spec.live_path] = hashlib.sha256(pre_bytes).hexdigest()
+
+        marker = MergeTransaction(
+            merge_id=merge_id,
+            started_at=datetime.now(tz=UTC),
+            target_ids=target_ids_in_play,
+            neutral_lkg_hash_after=hashlib.sha256(composed_yaml.encode("utf-8")).hexdigest(),
+            partial_owned_hashes=partial_owned_hashes,
+        )
+        self.tx_store.write(marker)
+
         any_changed = False
         for tid, files in target_outputs.items():
             target_cls = self.targets.get(tid)
@@ -617,9 +664,15 @@ class MergeEngine:
                 content = files.get(spec.repo_path, b"")
                 repo_file = repo.path / spec.repo_path
                 repo_file.parent.mkdir(parents=True, exist_ok=True)
+                # The recovery marker we wrote above promises we will write
+                # this file. Honor that promise unconditionally so doctor's
+                # post-crash inspection (compare on-disk SHA against the
+                # marker's `partial_owned_hashes`) is meaningful — skipping
+                # an unchanged write would leave the marker indistinguishable
+                # from a partial-write failure mode.
                 if not live_path.exists() or live_path.read_bytes() != content:
                     any_changed = True
-                    live_path.write_bytes(content)
+                live_path.write_bytes(content)
                 repo_file.write_bytes(content)
 
             repo.add_all()
@@ -631,8 +684,6 @@ class MergeEngine:
                 any_changed = True
 
         # 9. Update LKG and neutral file
-        composed_dict = composed.model_dump(mode="json", exclude_none=False)
-        composed_yaml = dump_yaml(composed_dict)
         if not self.paths.lkg.exists() or self.paths.lkg.read_text() != composed_yaml:
             any_changed = True
             self.paths.lkg.parent.mkdir(parents=True, exist_ok=True)
@@ -641,6 +692,12 @@ class MergeEngine:
             any_changed = True
             self.paths.neutral.parent.mkdir(parents=True, exist_ok=True)
             self.paths.neutral.write_text(composed_yaml, encoding="utf-8")
+
+        # Recovery marker cleanup (§4.6): a clean merge means any prior
+        # interruption has been resolved by the new consistent state we just
+        # landed. Clear our own marker AND every pre-existing stale marker.
+        for stale in self.tx_store.entries():
+            self.tx_store.clear(stale.merge_id)
 
         if not any_changed:
             return MergeResult(
