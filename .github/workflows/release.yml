@@ -1,0 +1,78 @@
+name: release
+
+# Manual-trigger only. Runs the four verification gates, then builds
+# the wheel + sdist via `uv build` and uploads them as a workflow
+# artifact named `dist`. Publishing to PyPI is a separate, deliberate
+# operator action — this workflow does NOT publish.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Git ref to build (defaults to the workflow's checkout)"
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build (gates + wheel + sdist)
+    runs-on: ubuntu-latest
+    steps:
+      # Pinning discipline mirrors .github/workflows/ci.yml: every
+      # third-party action is pinned to its full commit SHA, with a
+      # trailing comment naming the human-readable version that
+      # dependabot/renovate use to bump.
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: "3.13"
+
+      - name: Sync dependencies (frozen)
+        # --frozen requires uv.lock to be in sync with pyproject.toml.
+        # A release should never be cut from a branch with a stale lock.
+        run: uv sync --frozen
+
+      # The four verification gates from AGENTS.md / CLAUDE.md. A
+      # release MUST NOT be cut from a SHA where any of these fails.
+      - name: ruff check
+        run: uv run ruff check
+
+      - name: ruff format --check
+        run: uv run ruff format --check
+
+      - name: ty check
+        run: uv run ty check
+
+      - name: pytest
+        run: uv run pytest -v
+
+      - name: Build wheel and sdist
+        # `uv build` writes both formats into ./dist/ by default.
+        # Hatchling reads __version__ from src/chameleon/__init__.py
+        # via [tool.hatch.version], so the wheel/sdist version comes
+        # from whatever SHA we just checked out.
+        run: uv build
+
+      - name: Show built artifacts
+        run: ls -la dist/
+
+      - name: Upload dist artifacts
+        # upload-artifact's v4 floating tag and v4.6.2 currently point
+        # to the same commit; pinning the SHA here so a future v4
+        # retag can't silently shift the action under us.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
