@@ -53,12 +53,15 @@ class CodexInterfaceCodec:
                     message="interface.editor_mode has no Codex equivalent (Claude-only)",
                 )
             )
-        if model.voice_enabled is not None:
+        if model.voice is not None:
             ctx.warn(
                 LossWarning(
                     domain=Domains.INTERFACE,
                     target=BUILTIN_CODEX,
-                    message="interface.voice_enabled has no Codex equivalent",
+                    message=(
+                        "interface.voice has no Codex equivalent (Claude-only); "
+                        "dropping voice on encode to Codex"
+                    ),
                 )
             )
         return section

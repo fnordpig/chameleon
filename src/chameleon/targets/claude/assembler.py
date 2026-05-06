@@ -181,6 +181,7 @@ class ClaudeAssembler:
         interface_keys = {
             "tui",
             "statusLine",
+            "voice",
             "voiceEnabled",
             "prefersReducedMotion",
         }

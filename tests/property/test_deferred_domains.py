@@ -14,7 +14,7 @@ from chameleon.codecs.codex.interface import CodexInterfaceCodec
 from chameleon.codecs.codex.lifecycle import CodexLifecycleCodec
 from chameleon.schema.authorization import Authorization, DefaultMode
 from chameleon.schema.governance import Governance, Trust, Updates, UpdatesChannel
-from chameleon.schema.interface import Interface
+from chameleon.schema.interface import Interface, Voice
 from chameleon.schema.lifecycle import History, HistoryPersistence, Lifecycle
 
 # ---- Authorization ----------------------------------------------------------
@@ -81,7 +81,7 @@ def test_claude_interface_round_trip() -> None:
     orig = Interface(
         fullscreen=True,
         status_line_command="~/.claude/statusline.sh",
-        voice_enabled=True,
+        voice=Voice(enabled=True),
         motion_reduced=False,
     )
     ctx = TranspileCtx()
@@ -89,7 +89,8 @@ def test_claude_interface_round_trip() -> None:
     restored = ClaudeInterfaceCodec.from_target(section, ctx)
     assert restored.fullscreen is True
     assert restored.status_line_command == "~/.claude/statusline.sh"
-    assert restored.voice_enabled is True
+    assert restored.voice is not None
+    assert restored.voice.enabled is True
     assert restored.motion_reduced is False
 
 
