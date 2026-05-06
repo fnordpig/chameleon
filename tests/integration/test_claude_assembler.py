@@ -30,6 +30,8 @@ def test_disassemble_round_trips_minimal() -> None:
 
 
 def test_disassemble_routes_unclaimed_keys_to_passthrough() -> None:
-    raw = b'{"voice": {"enabled": true}}'
+    # `voice` is now claimed by ClaudeInterfaceCodec (P1-C); use a key that
+    # no codec claims as the canary for the pass-through path.
+    raw = b'{"someUnknownFutureKey": {"x": true}}'
     _domains, passthrough = ClaudeAssembler.disassemble({ClaudeAssembler.SETTINGS_JSON: raw})
-    assert "voice" in passthrough
+    assert "someUnknownFutureKey" in passthrough
