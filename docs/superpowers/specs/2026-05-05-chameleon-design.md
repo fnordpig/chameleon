@@ -206,6 +206,47 @@ explicitly.
 - Drift in a target that has no codec for that domain in V0. The
   pass-through namespace catches it; warned but not flagged.
 
+## 5.4 Strict typing rule (applies to every section that follows)
+
+**Everything is typed. No strings.** Every API surface in Chameleon —
+codec inputs and outputs, conflict records, drift records, target and
+domain identifiers, on-conflict strategies, file ownership flags — is
+expressed via Pydantic models, `enum.Enum` subclasses, or `Literal[...]`
+types. No `dict[str, Any]` floats free in the codebase except at the
+single boundary where it must: the **pass-through bag** (§7.1) which
+explicitly stores `dict[FieldName, JsonValue]` with `JsonValue` itself a
+recursive `pydantic.Json` type. Configuration that arrives from the wire
+(YAML, JSON, TOML) is parsed straight into Pydantic models; we never
+move untyped dicts through application code.
+
+Concretely:
+
+- `TargetId` is a Pydantic-validated identifier type (a frozen
+  `RootModel[str]` whose validator consults the registered-targets
+  registry — built-ins plus entry-point plugins). The static type is
+  `TargetId`, never `str`. Built-in convenience constants
+  `BUILTIN_CLAUDE` and `BUILTIN_CODEX` are pre-instantiated `TargetId`
+  values for the always-present targets. (A closed `Enum` would
+  preclude plugin-registered targets, so we use a registry-bound
+  newtype.)
+- `Domains` is an `enum.Enum` over the eight names in §7 — closed,
+  intentionally; adding a domain is a core change.
+- `OnConflict` is an `enum.Enum` (`FAIL`, `KEEP`, `PREFER_TARGET`,
+  `PREFER_NEUTRAL`); the `prefer=...` argument is parsed into
+  `(OnConflict.PREFER_TARGET, target=BUILTIN_CLAUDE)`.
+- `ReasoningEffort`, `SandboxMode`, `ApprovalPolicy`, etc. are typed
+  enums (mirroring upstream where present).
+- Every neutral key whose value is a fixed-vocabulary string in the
+  wire format becomes a `Literal[...]` or `Enum` field in Pydantic.
+- Codec routing (§8.1) does not look up keys by string — it consumes
+  typed sub-models that the disassembler constructs by Pydantic
+  field introspection.
+
+Static enforcement: `uv run ty check` is a verification gate; the CI
+configuration treats `Any`, `dict[str, ...]`, and untyped lambdas in
+production source as errors. The pass-through bag and serialization
+boundary code are explicitly marked in narrow modules.
+
 ## 6. Neutral Configuration Format
 
 ### 6.1 Why YAML
@@ -287,6 +328,15 @@ following table also serves as the V0 implementation map.
 > subset of any domain under a name. The neutral schema treats `profiles`
 > as a top-level key; governance does not.
 
+> **Note on `Domains` enum:** The eight names above (`identity`,
+> `directives`, `capabilities`, `authorization`, `environment`,
+> `lifecycle`, `interface`, `governance`) are members of an
+> `enum.Enum` named `Domains` in `chameleon/schema/_constants.py`.
+> Codec registration, drift records, conflict records, and CLI
+> output all use `Domains` members, never strings. Adding a new
+> domain requires editing this enum (and the `Neutral` model), which
+> is the entire surface for the rare event of adding a domain.
+
 V0 ships codecs only for the keys flagged "yes" above. All other
 domains have full Pydantic schemas (so the YAML is editable now), but
 their codecs are stubbed with `raise NotImplementedError("planned in
@@ -311,54 +361,83 @@ neutral files keep working under a deprecation warning.
 
 ### 8.1 Three small contracts
 
-**Codec** — pure function pair, one per `(target, domain)`:
+**Codec** — pure function pair, one per `(target, domain)`. The
+neutral and target sides are both typed Pydantic models; routing is
+done by field introspection, not string lookup:
 
 ```python
-class Codec(Protocol[NeutralDomain, TargetSection]):
-    target: ClassVar[str]
-    domain: ClassVar[str]
-    # The keys (or key prefixes) in the target's section that this codec
-    # claims responsibility for. The disassembler uses this to route
-    # input keys; any key in the target section not claimed by any codec
-    # is routed to pass-through (`targets.<target>.<key>` in neutral).
-    claimed_keys: ClassVar[frozenset[str]]
+class Codec[NeutralDomainModel: BaseModel, TargetSectionModel: BaseModel](Protocol):
+    target: ClassVar[TargetId]                # registry-validated newtype, not str
+    domain: ClassVar[Domains]                 # closed enum, not str
+    target_section: ClassVar[type[TargetSectionModel]]
+    # TargetSectionModel is a Pydantic submodel whose fields are exactly
+    # the keys this codec claims on the target side. The disassembler
+    # routes target input by walking the target's full generated model
+    # (§8.4) and matching field names — not strings — against each
+    # codec's target_section.model_fields. Anything not matched flows
+    # to pass-through (§7.1).
 
     @staticmethod
-    def to_target(model: NeutralDomain, ctx: TranspileCtx) -> TargetSection: ...
+    def to_target(
+        model: NeutralDomainModel, ctx: TranspileCtx,
+    ) -> TargetSectionModel: ...
 
     @staticmethod
-    def from_target(section: TargetSection, ctx: TranspileCtx) -> NeutralDomain: ...
+    def from_target(
+        section: TargetSectionModel, ctx: TranspileCtx,
+    ) -> NeutralDomainModel: ...
 ```
 
 `to_target` and `from_target` are stateless, deterministic, and never
-do I/O. `ctx` carries shared inputs (current scope, profile name,
-warning collector). Codecs may emit `LossWarning` via `ctx` when a
-neutral input is encoded with documented information loss (e.g. a
-neutral list is silently deduplicated, or a neutral key has no
-equivalent on this target and is being dropped); operators see these
-on stderr.
+do I/O. They consume typed Pydantic submodels and return typed
+Pydantic submodels — never dicts. `ctx` carries shared inputs (current
+scope, profile name, warning collector). Codecs may emit `LossWarning`
+via `ctx` when a neutral input is encoded with documented information
+loss (e.g. a neutral list is silently deduplicated, or a neutral key
+has no equivalent on this target and is being dropped); operators see
+these on stderr.
 
 Codecs do **not** decide pass-through — that's the disassembler's job
-(below). A codec only sees keys the disassembler routed to it via
-`claimed_keys`; unclaimed keys never reach codec code.
+(below). A codec only sees a typed submodel whose fields the
+disassembler populated; nothing else can reach codec code.
 
-**Assembler** — one per target, knows file layout but no semantics:
+**Assembler** — one per target, knows file layout but no semantics
+beyond key routing:
 
 ```python
-class Assembler(Protocol):
-    target: ClassVar[str]
-    files: ClassVar[tuple[FileSpec, ...]]   # paths, content-types, ownership rules
+class Assembler[FullTargetModel: BaseModel](Protocol):
+    target: ClassVar[TargetId]
+    full_model: ClassVar[type[FullTargetModel]]   # the generated upstream model (§8.4)
+    files: ClassVar[tuple[FileSpec, ...]]          # paths, content-types, ownership rules
 
     @staticmethod
-    def assemble(domains: dict[str, dict], passthrough: dict, ctx: AssembleCtx) -> dict[Path, str]: ...
+    def assemble(
+        per_domain: Mapping[Domains, BaseModel],   # one TargetSectionModel per domain
+        passthrough: PassThroughBag,               # typed bag of unclaimed fields
+        ctx: AssembleCtx,
+    ) -> Mapping[Path, FileBytes]: ...
 
     @staticmethod
-    def disassemble(files: dict[Path, str], ctx: DisassembleCtx) -> tuple[dict[str, dict], dict]: ...
+    def disassemble(
+        files: Mapping[Path, FileBytes], ctx: DisassembleCtx,
+    ) -> tuple[Mapping[Domains, BaseModel], PassThroughBag]: ...
 ```
 
-Returns a `(domain → section, passthrough)` tuple on disassemble. The
-passthrough dict is the bag of unclaimed keys to merge into
-`targets.<target>` of neutral.
+The disassembler:
+1. Parses the live target files into the generated `FullTargetModel`
+   (§8.5) using the appropriate format codec (yaml/json/toml from `io/`).
+2. Iterates the codecs registered for this target. For each codec,
+   constructs an instance of `codec.target_section` by copying field
+   values from `FullTargetModel` whose field names appear in
+   `codec.target_section.model_fields`.
+3. Any field of `FullTargetModel` that no codec claims, plus any
+   value held in `FullTargetModel`'s `additional_properties` overflow
+   (relevant for Claude — see §8.4), goes into `PassThroughBag`,
+   which is itself a typed structure: `dict[FieldName, JsonValue]`.
+
+The assembler does the inverse: takes the per-domain typed submodels
+plus the pass-through bag and rebuilds a `FullTargetModel`, then
+serializes it via the format codec to file bytes.
 
 **Target plugin** — declared via `chameleon.targets` Python entry point:
 
@@ -412,10 +491,11 @@ src/chameleon/
 │   └── governance.py
 ├── codecs/
 │   ├── __init__.py
-│   ├── _registry.py            # plugin discovery + lookup
+│   ├── _registry.py            # plugin discovery + lookup keyed on (TargetId, Domains)
 │   ├── claude/
 │   │   ├── __init__.py
-│   │   ├── identity.py
+│   │   ├── _generated.py       # GENERATED: full Pydantic ClaudeSettings (§8.5); checked-in artefact
+│   │   ├── identity.py         # imports ClaudeIdentitySection (a typed slice of _generated)
 │   │   ├── directives.py
 │   │   ├── capabilities.py
 │   │   ├── authorization.py    # raises NotImplementedError in V0
@@ -424,10 +504,12 @@ src/chameleon/
 │   │   ├── interface.py        # raises NotImplementedError in V0
 │   │   └── governance.py       # raises NotImplementedError in V0
 │   └── codex/
+│       ├── __init__.py
+│       ├── _generated.py       # GENERATED: full Pydantic CodexConfig (§8.5)
 │       └── ...                 # parallel structure to claude
 ├── targets/
 │   ├── __init__.py
-│   ├── _registry.py            # entry-point discovery
+│   ├── _registry.py            # entry-point discovery; binds plugin TargetIds at startup
 │   ├── claude/
 │   │   ├── __init__.py         # ClaudeTarget class wiring codecs + assembler
 │   │   └── assembler.py        # settings.json + .mcp.json + ~/.claude.json layout
@@ -458,7 +540,52 @@ informative rather than noise. (Claude's `settings.json` format is
 plain JSON without comment support, so `tomlkit`-style comment
 preservation isn't applicable; key-order preservation is enough.)
 
-### 8.4 Round-trip equivalence as test contract
+### 8.4 Upstream schema canonization
+
+Every target's typing grounds out in a JSON Schema produced by the
+upstream authority for that target. We never hand-author the
+generated `FullTargetModel`; we generate it from the upstream schema
+and check the generated artefact into git so the runtime path needs
+no codegen tooling.
+
+| Target | Canonical authority | Format we ingest | Generation pipeline |
+|---|---|---|---|
+| **claude** | `https://json.schemastore.org/claude-code-settings.json` (Draft-07 JSON Schema; loose: `additionalProperties: true`) | JSON Schema Draft-07 | vendored at `tools/sync-schemas/upstream/claude.schema.json`; regenerated via `datamodel-code-generator --input-file-type jsonschema` to `src/chameleon/codecs/claude/_generated.py` |
+| **codex** | `codex-rs/protocol/src/config_types.rs` + `codex-rs/core/src/config/` (Rust types deriving `schemars::JsonSchema`) | JSON Schema (emitted by a small Rust binary we vendor under `tools/sync-schemas/codex/`) | runs the Rust binary to dump JSON Schema, then `datamodel-code-generator` to `src/chameleon/codecs/codex/_generated.py` |
+
+Each target's `_generated.py` is a Pydantic model with full type
+fidelity to its upstream schema — nested models, enums, discriminated
+unions where the schema declares them. The generated file is
+**vendored** (committed to git) for two reasons: (1) `uv sync` must
+not require Rust toolchain or network access; (2) regenerations
+become reviewable diffs against codec expectations.
+
+Pinning and refresh:
+
+- `tools/sync-schemas/pins.toml` records the exact upstream commit
+  for both Claude (schemastore git SHA) and Codex (Codex CLI git SHA
+  + Rust toolchain version). The build does not refresh implicitly.
+- `tools/sync-schemas/sync.py` is the operator-run command. It pulls
+  upstream at the pinned ref, regenerates `_generated.py` for each
+  target, and runs `uv run pytest -m schema_drift` to surface codec
+  expectations that no longer match upstream.
+- Refreshes are explicit PRs that bump `pins.toml`, regenerate the
+  vendored schemas + Pydantic models, and update any codecs whose
+  contracts broke. Reviewers see exactly what changed upstream.
+
+Loose-schema handling (Claude side):
+
+The Claude JSON Schema declares `additionalProperties: true` at the
+root and inside several `$defs`. The generated Pydantic model
+mirrors this with a `model_config = ConfigDict(extra="allow")` plus
+an explicit `additional_properties: dict[str, JsonValue]` field for
+the disassembler to harvest. Properties absent from the schema but
+present in real configs land here automatically and round-trip
+through pass-through. This pattern is **also** used on the Codex
+side for `[unknown sections]` to defend against upstream additions
+landing between sync refreshes.
+
+### 8.5 Round-trip equivalence as test contract
 
 For every `(target, domain)` codec pair, the test suite asserts:
 
@@ -557,21 +684,33 @@ on every read/write.
 V0 ships:
 
 - The full eight-domain Pydantic schema, the profiles overlay, and the
-  pass-through namespace.
+  pass-through namespace — all typed (no `dict[str, Any]` in domain
+  code).
+- Generated `_generated.py` for `claude` (from schemastore.org Draft-07
+  JSON Schema) and `codex` (from `codex-rs` Rust types via the
+  vendored sync binary). Both checked into git at pinned upstream refs
+  recorded in `tools/sync-schemas/pins.toml`.
 - Codecs for: `identity` (model + reasoning_effort + provider + auth
   method), `directives.commit_attribution` + `directives.system_prompt_file`,
   `capabilities.mcp_servers`, `environment.variables`. Two targets ×
-  four domain-slices ≈ 8 codec files.
-- Assemblers for `claude` and `codex` covering the live files in §10.2.
-- Merge engine with interactive + non-interactive conflict resolution.
+  four domain-slices ≈ 8 codec files; each codec consumes typed
+  Pydantic submodels of the corresponding `_generated.py`.
+- Assemblers for `claude` and `codex` covering the live files in §10.2,
+  including pass-through harvesting through the typed `additional_properties`
+  overflow.
+- Merge engine with interactive + non-interactive conflict resolution,
+  with all conflict and drift records as typed Pydantic models.
 - Per-target git state via subprocess `git` (no `GitPython` dependency
   at this stage; subprocess is enough and avoids a heavy dep).
 - CLI commands: `init`, `merge`, `status`, `diff`, `log`, `adopt`,
   `discard`, `validate`, `doctor`, `targets list`. (`profile use`
-  deferred.)
+  deferred.) CLI argument parsing produces typed `TargetId`, `Domains`,
+  `OnConflict` values; no string `match` statements downstream.
+- `tools/sync-schemas/sync.py` operational, with at least one
+  successful refresh recorded in pins.toml.
 - Documentation: README, AGENTS.md (with CLAUDE.md symlink), the
   schema reference auto-generated from Pydantic models, login-time
-  recipe stubs, plugin authoring guide.
+  recipe stubs, plugin authoring guide, schema-sync runbook.
 
 V0 does **not** ship: codecs for `authorization`, `lifecycle`,
 `interface`, `governance`; project-scope neutral file support;
@@ -597,6 +736,15 @@ work, not tested in CI").
   → assert state-repo commit graph and live-file content.
 - **CLI smoke tests** — invoke each subcommand via subprocess against
   a fixture environment.
+- **Schema drift tests** (`tests/schema_drift/`) — assert that every
+  codec's `target_section` declares only field names that exist in
+  the corresponding generated `_generated.py` model. Catches the
+  case where an upstream schema regeneration removed a field a codec
+  still expects.
+- **Typing-rule audit** — `tests/typing_audit.py` greps the production
+  source for forbidden patterns (`dict[str, Any]`, bare `: str` for
+  enum-able fields named `target`/`domain`/`mode`/`policy`/etc.). Cheap,
+  blunt, effective at catching regressions on the "no strings" rule.
 
 Verification gates (must pass before any commit claims completion):
 
@@ -611,20 +759,30 @@ uv run pytest
 
 A target plugin is a Python package with:
 
-1. A class implementing the `Target` protocol (eight codecs +
-   one assembler + path table + name).
-2. An entry point in its `pyproject.toml`:
+1. A class implementing the `Target` protocol (eight codecs + one
+   assembler + path table + a static `target_id: TargetId` it claims
+   on registration).
+2. A vendored `_generated.py` produced from its own canonical schema
+   authority via the same `tools/sync-schemas/` pattern. The plugin's
+   docs explain how to refresh it; Chameleon does not require a
+   shared codegen toolchain across plugins.
+3. An entry point in its `pyproject.toml`:
    ```toml
    [project.entry-points."chameleon.targets"]
    <target-name> = "<package>.<module>:<TargetClass>"
    ```
-3. `pip install`-able into the same environment as `chameleon`; uv
-   automatic-discovers it on next run.
+   On import, Chameleon's registry adds the plugin's `target_id` to
+   the set `TargetId`'s validator consults, so the new identifier is
+   instantly typed and accepted.
+4. `pip install`-able into the same environment as `chameleon`; uv
+   auto-discovers it on next run.
 
-Plugin authoring guide (in `docs/plugins/`) covers: how codecs
-should report `Unsupported`, how to handle partial-ownership files,
-how to write golden tests against a published `chameleon-test-kit`
-helper package (deferred — listed under §15 open questions).
+Plugin authoring guide (in `docs/plugins/`) covers: how to declare
+target_section submodels against the plugin's `_generated.py`, how
+to handle partial-ownership files, how the registry binds `TargetId`
+at startup, and how to write golden tests against a published
+`chameleon-test-kit` helper package (deferred — listed under §15
+open questions).
 
 ## 14. Project Setup (Tooling)
 
@@ -646,12 +804,23 @@ chameleon/
 │   ├── plugins/                 # plugin authoring guide
 │   └── schema/                  # auto-generated reference
 ├── src/chameleon/               # see §8.3
+├── tools/
+│   └── sync-schemas/            # operator-run; never invoked at install or runtime
+│       ├── pins.toml            # pinned upstream refs for claude + codex
+│       ├── sync.py              # orchestrator: pull → emit → datamodel-codegen
+│       ├── upstream/
+│       │   └── claude.schema.json   # vendored snapshot at the pinned ref
+│       └── codex/
+│           ├── Cargo.toml       # tiny Rust binary that imports codex's config
+│           │                    # types and dumps schemars JsonSchema as JSON
+│           └── src/main.rs
 ├── tests/
 │   ├── unit/
 │   ├── property/
 │   ├── golden/<scenario>/
 │   ├── conflicts/
-│   └── integration/
+│   ├── integration/
+│   └── schema_drift/            # asserts vendored upstream schemas still match codec expectations
 └── skills/                      # Claude Code skills shipped with the project
     └── README.md                # placeholder; skills added as workflows mature
 ```
@@ -667,6 +836,9 @@ chameleon/
   `platformdirs` (XDG), `rich` (TUI rendering for status/diff/log).
 - Dev deps via `[dependency-groups] dev = [...]`: `pytest>=8`,
   `pytest-cov`, `hypothesis`, `ruff>=0.15`, `ty>=0.0.34`.
+- Schema-sync deps via `[dependency-groups] schema-sync = [...]`:
+  `datamodel-code-generator>=0.27`. Used only by `tools/sync-schemas/`;
+  not pulled in by `uv sync` for normal development.
 - `[tool.ruff]`: line-length 100, target-version py312, lint
   rules `E,F,I,UP,B,SIM,RUF,PT,PL,N`.
 - `[tool.ruff.format]`: enable; preview off.
@@ -690,6 +862,9 @@ documented as anti-patterns.
 - **`uv`** — required for development workflow but not at runtime;
   the `chameleon` console script entry point installs into the venv
   produced by `uv sync` like any other Python tool.
+- **`cargo` + Rust toolchain** — required only when running
+  `tools/sync-schemas/sync.py codex`, never at install or runtime.
+  Operators who never refresh schemas never need Rust.
 
 ### 14.4 AGENTS.md / CLAUDE.md content
 
@@ -758,6 +933,17 @@ re-architecture.
    authors a property-test harness for their codecs.
 10. **Schema migrations** — when `schema_version` bumps, how Chameleon
     rewrites old neutral files.
+11. **Upstream-schema regeneration on a schedule** — V0 makes
+    `tools/sync-schemas/sync.py` a manual operator command. A CI job
+    that opens regenerate-PRs against the pinned schemas (e.g. weekly,
+    automatic) is a natural follow-on once the codec contract is
+    stable enough that drift PRs are routine review.
+12. **Direct reuse of OpenAI's published Python SDK** — the Codex repo
+    ships `sdk/python/src/codex_app_server/.../v2_all.py` (the app-server
+    protocol, not the config types). If OpenAI publishes a config-types
+    Python package downstream, Chameleon could depend on it instead of
+    regenerating from Rust. We do not depend on this happening; the
+    schemars-based pipeline is self-sufficient.
 
 ---
 
