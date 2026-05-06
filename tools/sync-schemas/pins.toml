@@ -6,7 +6,7 @@
 # schemastore.org's claude-code-settings.json is updated frequently.
 # Pin a specific commit SHA to make regeneration reproducible.
 source = "https://raw.githubusercontent.com/SchemaStore/schemastore/{git_sha}/src/schemas/json/claude-code-settings.json"
-git_sha = "REPLACE_WITH_ACTUAL_SHA_AT_FIRST_RUN"
+git_sha = "d3cbd0bf40e8c45f8b88e87d3bc40fdbf9644500"
 vendored_at = "tools/sync-schemas/upstream/claude.schema.json"
 
 [codex]
