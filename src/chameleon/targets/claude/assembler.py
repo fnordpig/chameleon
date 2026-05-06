@@ -17,6 +17,7 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 from chameleon._types import FileFormat, FileOwnership, FileSpec, TargetId
+from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.claude import ClaudeSettings
 from chameleon.codecs.claude.authorization import ClaudeAuthorizationSection
 from chameleon.codecs.claude.capabilities import ClaudeCapabilitiesSection
@@ -28,6 +29,7 @@ from chameleon.codecs.claude.interface import ClaudeInterfaceSection
 from chameleon.codecs.claude.lifecycle import ClaudeLifecycleSection
 from chameleon.io.json import dump_json, load_json
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
+from chameleon.targets._protocol import safe_validate_section
 
 
 class ClaudeAssembler:
@@ -135,9 +137,19 @@ class ClaudeAssembler:
         }
 
     @staticmethod
-    def disassemble(  # noqa: PLR0912 — fans across 8 domains plus capabilities multi-file
+    def disassemble(  # noqa: PLR0912, PLR0915 — fans across 8 domains plus capabilities multi-file
         files: Mapping[str, bytes],
+        *,
+        ctx: TranspileCtx | None = None,
     ) -> tuple[dict[Domains, BaseModel], dict[str, object]]:
+        """Disassemble Claude live files into per-domain sections + bag.
+
+        ``ctx`` is optional. When supplied, per-domain ``ValidationError``s
+        are caught and surfaced as typed ``LossWarning``s; the offending
+        keys land in pass-through. When omitted (e.g., direct unit tests),
+        the catch-and-route still happens but the warning is discarded —
+        callers that don't ask for warnings still don't crash.
+        """
         per_domain: dict[Domains, BaseModel] = {}
         passthrough: dict[str, object] = {}
 
@@ -175,31 +187,42 @@ class ClaudeAssembler:
         # in P1-A; both are claimed by ``ClaudeCapabilitiesCodec``.
         capabilities_settings_keys = {"enabledPlugins", "extraKnownMarketplaces"}
 
+        def _validate(
+            section_cls: type[BaseModel],
+            section_obj: Mapping[str, object],
+            domain: Domains,
+        ) -> None:
+            safe_validate_section(
+                section_cls,
+                section_obj,
+                domain,
+                ClaudeAssembler.target,
+                ctx=ctx,
+                per_domain=per_domain,
+                passthrough=passthrough,
+            )
+
         identity_obj = {k: v for k, v in settings.items() if k in identity_keys}
         if identity_obj:
-            per_domain[Domains.IDENTITY] = ClaudeIdentitySection.model_validate(identity_obj)
+            _validate(ClaudeIdentitySection, identity_obj, Domains.IDENTITY)
         directives_obj = {k: v for k, v in settings.items() if k in directives_keys}
         if directives_obj:
-            per_domain[Domains.DIRECTIVES] = ClaudeDirectivesSection.model_validate(directives_obj)
+            _validate(ClaudeDirectivesSection, directives_obj, Domains.DIRECTIVES)
         environment_obj = {k: v for k, v in settings.items() if k in environment_keys}
         if environment_obj:
-            per_domain[Domains.ENVIRONMENT] = ClaudeEnvironmentSection.model_validate(
-                environment_obj
-            )
+            _validate(ClaudeEnvironmentSection, environment_obj, Domains.ENVIRONMENT)
         authorization_obj = {k: v for k, v in settings.items() if k in authorization_keys}
         if authorization_obj:
-            per_domain[Domains.AUTHORIZATION] = ClaudeAuthorizationSection.model_validate(
-                authorization_obj
-            )
+            _validate(ClaudeAuthorizationSection, authorization_obj, Domains.AUTHORIZATION)
         lifecycle_obj = {k: v for k, v in settings.items() if k in lifecycle_keys}
         if lifecycle_obj:
-            per_domain[Domains.LIFECYCLE] = ClaudeLifecycleSection.model_validate(lifecycle_obj)
+            _validate(ClaudeLifecycleSection, lifecycle_obj, Domains.LIFECYCLE)
         interface_obj = {k: v for k, v in settings.items() if k in interface_keys}
         if interface_obj:
-            per_domain[Domains.INTERFACE] = ClaudeInterfaceSection.model_validate(interface_obj)
+            _validate(ClaudeInterfaceSection, interface_obj, Domains.INTERFACE)
         governance_obj = {k: v for k, v in settings.items() if k in governance_keys}
         if governance_obj:
-            per_domain[Domains.GOVERNANCE] = ClaudeGovernanceSection.model_validate(governance_obj)
+            _validate(ClaudeGovernanceSection, governance_obj, Domains.GOVERNANCE)
 
         claimed = (
             identity_keys
@@ -212,7 +235,7 @@ class ClaudeAssembler:
             | capabilities_settings_keys
         )
         for k, v in settings.items():
-            if k not in claimed:
+            if k not in claimed and k not in passthrough:
                 passthrough[k] = v
 
         # Capabilities is unique: its keys span TWO files. The mcp_servers
@@ -228,9 +251,7 @@ class ClaudeAssembler:
         if "extraKnownMarketplaces" in settings:
             capabilities_obj["extraKnownMarketplaces"] = settings["extraKnownMarketplaces"]
         if capabilities_obj:
-            per_domain[Domains.CAPABILITIES] = ClaudeCapabilitiesSection.model_validate(
-                capabilities_obj
-            )
+            _validate(ClaudeCapabilitiesSection, capabilities_obj, Domains.CAPABILITIES)
 
         return per_domain, passthrough
 

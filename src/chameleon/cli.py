@@ -164,6 +164,12 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     engine = MergeEngine(targets=targets, paths=paths, resolver=resolver)
     result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
     sys.stdout.write(result.summary + "\n")
+    # P0-2: print LossWarnings to stderr after the summary so the operator
+    # sees what (if anything) was skipped without changing the exit code.
+    # The warning includes the field-level error from Pydantic so the
+    # operator can find the offending key in their live config.
+    for w in result.warnings:
+        sys.stderr.write(f"warning: [{w.target.value}/{w.domain.value}] {w.message}\n")
     return result.exit_code
 
 

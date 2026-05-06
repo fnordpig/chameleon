@@ -16,6 +16,7 @@ import tomlkit
 from pydantic import BaseModel
 
 from chameleon._types import FileFormat, FileOwnership, FileSpec, TargetId
+from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex import CodexConfig
 from chameleon.codecs.codex.authorization import CodexAuthorizationSection
 from chameleon.codecs.codex.capabilities import CodexCapabilitiesSection
@@ -27,6 +28,7 @@ from chameleon.codecs.codex.interface import CodexInterfaceSection
 from chameleon.codecs.codex.lifecycle import CodexLifecycleSection
 from chameleon.io.toml import dump_toml, load_toml
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
+from chameleon.targets._protocol import safe_validate_section
 
 
 class CodexAssembler:
@@ -159,7 +161,17 @@ class CodexAssembler:
     @staticmethod
     def disassemble(
         files: Mapping[str, bytes],
+        *,
+        ctx: TranspileCtx | None = None,
     ) -> tuple[dict[Domains, BaseModel], dict[str, object]]:
+        """Disassemble Codex live files into per-domain sections + bag.
+
+        ``ctx`` is optional. When supplied, per-domain ``ValidationError``s
+        are caught and surfaced as typed ``LossWarning``s; the offending
+        keys land in pass-through. Mirrors the Claude assembler's contract
+        — see ``ClaudeAssembler.disassemble`` and the shared
+        ``safe_validate_section`` helper for the exact shape.
+        """
         per_domain: dict[Domains, BaseModel] = {}
         passthrough: dict[str, object] = {}
 
@@ -176,36 +188,45 @@ class CodexAssembler:
         interface_keys = {"tui", "file_opener"}
         governance_keys = {"features", "projects"}
 
+        def _validate(
+            section_cls: type[BaseModel],
+            section_obj: Mapping[str, object],
+            domain: Domains,
+        ) -> None:
+            safe_validate_section(
+                section_cls,
+                section_obj,
+                domain,
+                CodexAssembler.target,
+                ctx=ctx,
+                per_domain=per_domain,
+                passthrough=passthrough,
+            )
+
         identity_obj = {k: v for k, v in as_dict.items() if k in identity_keys}
         if identity_obj:
-            per_domain[Domains.IDENTITY] = CodexIdentitySection.model_validate(identity_obj)
+            _validate(CodexIdentitySection, identity_obj, Domains.IDENTITY)
         directives_obj = {k: v for k, v in as_dict.items() if k in directives_keys}
         if directives_obj:
-            per_domain[Domains.DIRECTIVES] = CodexDirectivesSection.model_validate(directives_obj)
+            _validate(CodexDirectivesSection, directives_obj, Domains.DIRECTIVES)
         capabilities_obj = {k: v for k, v in as_dict.items() if k in capabilities_keys}
         if capabilities_obj:
-            per_domain[Domains.CAPABILITIES] = CodexCapabilitiesSection.model_validate(
-                capabilities_obj
-            )
+            _validate(CodexCapabilitiesSection, capabilities_obj, Domains.CAPABILITIES)
         environment_obj = {k: v for k, v in as_dict.items() if k in environment_keys}
         if environment_obj:
-            per_domain[Domains.ENVIRONMENT] = CodexEnvironmentSection.model_validate(
-                environment_obj
-            )
+            _validate(CodexEnvironmentSection, environment_obj, Domains.ENVIRONMENT)
         authorization_obj = {k: v for k, v in as_dict.items() if k in authorization_keys}
         if authorization_obj:
-            per_domain[Domains.AUTHORIZATION] = CodexAuthorizationSection.model_validate(
-                authorization_obj
-            )
+            _validate(CodexAuthorizationSection, authorization_obj, Domains.AUTHORIZATION)
         lifecycle_obj = {k: v for k, v in as_dict.items() if k in lifecycle_keys}
         if lifecycle_obj:
-            per_domain[Domains.LIFECYCLE] = CodexLifecycleSection.model_validate(lifecycle_obj)
+            _validate(CodexLifecycleSection, lifecycle_obj, Domains.LIFECYCLE)
         interface_obj = {k: v for k, v in as_dict.items() if k in interface_keys}
         if interface_obj:
-            per_domain[Domains.INTERFACE] = CodexInterfaceSection.model_validate(interface_obj)
+            _validate(CodexInterfaceSection, interface_obj, Domains.INTERFACE)
         governance_obj = {k: v for k, v in as_dict.items() if k in governance_keys}
         if governance_obj:
-            per_domain[Domains.GOVERNANCE] = CodexGovernanceSection.model_validate(governance_obj)
+            _validate(CodexGovernanceSection, governance_obj, Domains.GOVERNANCE)
 
         claimed = (
             identity_keys
@@ -218,7 +239,7 @@ class CodexAssembler:
             | governance_keys
         )
         for k, v in as_dict.items():
-            if k not in claimed:
+            if k not in claimed and k not in passthrough:
                 passthrough[k] = v
 
         return per_domain, passthrough
