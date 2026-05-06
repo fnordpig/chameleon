@@ -15,7 +15,7 @@ vendored_at = "tools/sync-schemas/upstream/claude.schema.json"
 # tools/sync-schemas/codex/ depends on codex-rs as a git dependency at
 # this pin and dumps the schema for ConfigToml on stdout.
 git_url = "https://github.com/openai/codex.git"
-git_sha = "REPLACE_WITH_ACTUAL_SHA_AT_FIRST_RUN"
+git_sha = "35aaa5d9fcb606fb6f27dd5747ecab3f4ba0c07e"
 config_struct = "ConfigToml"
 config_crate_path = "codex-rs/config"
 vendored_at = "tools/sync-schemas/upstream/codex.schema.json"

@@ -1,0 +1,16 @@
+[package]
+name = "codex-schema-dump"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "codex-schema-dump"
+path = "src/main.rs"
+
+[dependencies]
+# Pinned to the SHA recorded in tools/sync-schemas/pins.toml under [codex].git_sha.
+# codex-config is the codex-rs workspace crate that defines ConfigToml.
+codex-config = { git = "https://github.com/openai/codex.git", rev = "35aaa5d9fcb606fb6f27dd5747ecab3f4ba0c07e", package = "codex-config" }
+schemars = "0.8"
+serde_json = "1"
