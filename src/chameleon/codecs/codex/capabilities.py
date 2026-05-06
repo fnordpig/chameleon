@@ -26,7 +26,11 @@ from chameleon.schema.capabilities import (
 
 
 class _CodexMcpServerStdio(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # ``extra="allow"`` (B1) — upstream Codex may add fields like
+    # ``startup_timeout_sec`` per server entry; preserve them through
+    # round-trip via ``__pydantic_extra__`` rather than crashing on
+    # unknown fields.
+    model_config = ConfigDict(extra="allow")
     enabled: bool = True
     command: str
     args: list[str] = Field(default_factory=list)
@@ -34,7 +38,7 @@ class _CodexMcpServerStdio(BaseModel):
 
 
 class _CodexMcpServerHttp(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     enabled: bool = True
     url: str
     bearer_token_env_var: str | None = None
@@ -78,7 +82,7 @@ class _CodexMarketplaceEntry(BaseModel):
 
 
 class CodexCapabilitiesSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     mcp_servers: dict[str, _CodexMcpServer] = Field(default_factory=dict)
     plugins: dict[str, _CodexPluginEntry] = Field(default_factory=dict)
     marketplaces: dict[str, _CodexMarketplaceEntry] = Field(default_factory=dict)

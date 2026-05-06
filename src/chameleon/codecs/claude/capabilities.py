@@ -35,7 +35,10 @@ class _ClaudeMcpServerStdio(BaseModel):
     reject every modern Claude config (parity-gap.md P0-1).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    # ``extra="allow"`` (B1) — preserve upstream-introduced per-server
+    # fields (e.g. ``startup_timeout_ms``, ``env_files``) through
+    # round-trip via ``__pydantic_extra__``.
+    model_config = ConfigDict(extra="allow")
 
     type: Literal["stdio"] = "stdio"
     command: str
@@ -44,7 +47,7 @@ class _ClaudeMcpServerStdio(BaseModel):
 
 
 class _ClaudeMcpServerHttp(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
 
     type: Literal["http"] = "http"
     url: str
@@ -109,7 +112,7 @@ class _ClaudeMarketplace(BaseModel):
 
 
 class ClaudeCapabilitiesSection(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
 
     mcpServers: dict[str, _ClaudeMcpServer] = Field(default_factory=dict)  # noqa: N815
     enabledMcpjsonServers: list[str] = Field(default_factory=list)  # noqa: N815

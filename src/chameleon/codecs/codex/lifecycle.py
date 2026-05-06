@@ -33,13 +33,15 @@ def _hooks_has_any_event(hooks: Hooks) -> bool:
 
 
 class _CodexHistory(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # ``extra="allow"`` (B1) — unclaimed sub-keys round-trip through
+    # ``__pydantic_extra__`` and are re-emitted by the assembler.
+    model_config = ConfigDict(extra="allow")
     persistence: str | None = None
     max_bytes: int | None = None
 
 
 class CodexLifecycleSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     history: _CodexHistory = Field(default_factory=_CodexHistory)
 
 

@@ -19,7 +19,11 @@ class _CodexTui(BaseModel):
 
 
 class CodexInterfaceSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    # ``extra="allow"`` (B1) — let unclaimed top-level keys land in
+    # ``__pydantic_extra__`` so the assembler can re-emit them on
+    # round-trip. The codec itself ignores extras; they survive purely
+    # via the ``existing``-overlay path in ``CodexAssembler.assemble``.
+    model_config = ConfigDict(extra="allow")
     tui: _CodexTui = Field(default_factory=_CodexTui)
     file_opener: str | None = None
 

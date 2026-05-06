@@ -18,7 +18,7 @@ from chameleon.schema.directives import Directives, Personality
 
 
 class CodexDirectivesSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     model_instructions_file: str | None = None
     commit_attribution: str | None = None
     personality: CodexPersonality | None = None

@@ -13,16 +13,17 @@ fixture, asserting the V0+post-Wave-4 contract:
   - `chameleon discard <target> --yes` restores live to state-repo HEAD.
   - `chameleon merge --dry-run` writes nothing.
 
-Three known bugs documented in
-``docs/superpowers/specs/2026-05-06-smoke-findings.md`` are pinned as
-xfails here so the test suite doesn't drift away from honest reporting:
+Two known bugs documented in
+``docs/superpowers/specs/2026-05-06-smoke-findings.md`` remain pinned
+as xfails here so the test suite doesn't drift away from honest
+reporting (B1 was fixed in Wave-5; ``test_codex_tui_subtable_preserved``
+is now a passing assertion):
 
-  - B1: Codex `[tui]` sub-table data loss.
   - B2: Marketplace dict ordering instability across keep-merges.
   - B3: Per-FieldPath leaf-write skips schema coercion.
 
-When any of those fixes lands, the corresponding xfail flips to a
-real assertion and the bug is closed for good.
+When either fix lands, the corresponding xfail flips to a real
+assertion and the bug is closed for good.
 """
 
 from __future__ import annotations
@@ -165,15 +166,9 @@ def test_dry_run_writes_nothing(exemplar_env: dict[str, Path]) -> None:
     assert live_codex.read_bytes() == pre_codex, "dry-run modified Codex config"
 
 
-# ---- Pinned regressions (xfailed until B1/B2/B3 fix lands) ----------------
+# ---- Pinned regressions (xfailed until B2/B3 fix lands) -------------------
 
 
-@pytest.mark.xfail(
-    reason="B1: Codex partially-claimed sub-tables lose unclaimed sub-keys "
-    "(e.g. [tui].status_line, [tui.model_availability_nux]). "
-    "See docs/superpowers/specs/2026-05-06-smoke-findings.md.",
-    strict=True,
-)
 def test_codex_tui_subtable_preserved(exemplar_env: dict[str, Path]) -> None:
     live_codex = exemplar_env["home"] / ".codex" / "config.toml"
     baseline = live_codex.read_text()

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import ClassVar, Protocol, runtime_checkable
+from collections.abc import Mapping, MutableMapping
+from typing import ClassVar, Protocol, cast, runtime_checkable
 
 from pydantic import BaseModel, ValidationError
 
@@ -54,6 +54,104 @@ def safe_validate_section(
             passthrough[k] = v
 
 
+def harvest_section_extras(section: BaseModel) -> dict[str, object]:
+    """Recursively collect ``__pydantic_extra__`` from a section model tree.
+
+    B1 — when a section model uses ``ConfigDict(extra="allow")``, Pydantic
+    parks unmodelled keys in ``__pydantic_extra__``. The assembler uses
+    those extras to re-emit unclaimed sub-keys on round-trip (e.g.
+    ``[tui].status_line`` and ``[tui.model_availability_nux]`` for Codex
+    interface) so partially-claimed nested tables don't lose their
+    unclaimed inner keys.
+
+    The returned dict has the same nesting shape as the section model:
+    ``{"tui": {"status_line": [...], "model_availability_nux": {...}}}``.
+    Keys present in the section's *modeled* fields are excluded — only
+    unmodelled extras appear. Empty dicts are pruned so callers can use
+    a non-empty test to skip merge work.
+    """
+    out: dict[str, object] = {}
+    extras = getattr(section, "__pydantic_extra__", None) or {}
+    for k, v in extras.items():
+        out[k] = v
+    for field_name in type(section).model_fields:
+        value = getattr(section, field_name, None)
+        sub_extras = _walk_field_extras(value)
+        if sub_extras:
+            out[field_name] = sub_extras
+    return out
+
+
+def _walk_field_extras(value: object) -> object:
+    """Walk into a field value, collecting nested extras recursively.
+
+    Returns an extras-shaped overlay (dict / list / scalar). Returns an
+    empty dict when no extras live anywhere under ``value``.
+    """
+    if isinstance(value, BaseModel):
+        return harvest_section_extras(value)
+    if isinstance(value, dict):
+        # ``dict[str, BaseModel]`` (e.g. ``mcp_servers: dict[str, _CodexMcpServerStdio]``):
+        # produce per-key extras only when at least one entry has extras.
+        nested: dict[str, object] = {}
+        for k, v in value.items():
+            sub = _walk_field_extras(v)
+            if sub:
+                nested[str(k)] = sub
+        return nested
+    if isinstance(value, list):
+        # Lists of BaseModel (e.g. hook matchers) — collect extras
+        # positionally so the caller can splice them by index.
+        nested_list: list[object] = []
+        any_extras = False
+        for v in value:
+            sub = _walk_field_extras(v)
+            nested_list.append(sub)
+            if sub:
+                any_extras = True
+        return nested_list if any_extras else {}
+    return {}
+
+
+def merge_extras_into_dict(
+    target: MutableMapping[str, object],
+    extras: Mapping[str, object],
+) -> None:
+    """Merge ``extras`` into ``target`` recursively, in place.
+
+    The ``target`` is the freshly-built per-domain output dict (or a
+    sub-table thereof); ``extras`` is the matching slice of the
+    extras-overlay produced by ``harvest_section_extras``. Keys already
+    present in ``target`` are left alone — codec output is canonical for
+    modelled fields; extras only fill in unclaimed sub-keys.
+    """
+    for k, v in extras.items():
+        if isinstance(v, dict) and v:
+            existing = target.get(k)
+            if isinstance(existing, MutableMapping):
+                # Recurse into the nested map. Pydantic-validated
+                # nested values land here (tomlkit Tables, plain dicts,
+                # etc.); the cast carries us through ``MutableMapping``'s
+                # invariant generics — runtime guarantees the keys are
+                # ``str`` since both halves come from JSON/TOML decoders.
+                merge_extras_into_dict(
+                    cast("MutableMapping[str, object]", existing),
+                    cast("Mapping[str, object]", v),
+                )
+            elif k not in target:
+                # Unclaimed sub-table the codec didn't emit; copy through.
+                target[k] = dict(v)
+            # If ``target[k]`` exists but isn't a dict, the codec wrote a
+            # scalar where the live had a sub-table — leave the codec's
+            # value alone; modelled wins.
+        elif k not in target:
+            # Scalar (or list-of-scalars) extra — copy through verbatim.
+            # List-of-BaseModel cases never reach here; ``_walk_field_extras``
+            # only emits a non-empty list when at least one element has
+            # extras, and the dict-keyed branch above handles that shape.
+            target[k] = v
+
+
 @runtime_checkable
 class Assembler(Protocol):
     target: ClassVar[TargetId]
@@ -83,4 +181,10 @@ class Target(Protocol):
     codecs: ClassVar[tuple[type[Codec], ...]]
 
 
-__all__ = ["Assembler", "Target", "safe_validate_section"]
+__all__ = [
+    "Assembler",
+    "Target",
+    "harvest_section_extras",
+    "merge_extras_into_dict",
+    "safe_validate_section",
+]

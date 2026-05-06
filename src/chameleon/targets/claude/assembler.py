@@ -29,7 +29,11 @@ from chameleon.codecs.claude.interface import ClaudeInterfaceSection
 from chameleon.codecs.claude.lifecycle import ClaudeLifecycleSection
 from chameleon.io.json import dump_json, load_json
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
-from chameleon.targets._protocol import safe_validate_section
+from chameleon.targets._protocol import (
+    harvest_section_extras,
+    merge_extras_into_dict,
+    safe_validate_section,
+)
 
 
 class ClaudeAssembler:
@@ -124,6 +128,16 @@ class ClaudeAssembler:
             if k not in settings_obj:
                 settings_obj[k] = v
 
+        # B1 — sub-table preservation. For each codec section a domain
+        # produced, look up the matching disassembled section in
+        # ``existing`` and recover any unclaimed sub-keys parked in
+        # ``__pydantic_extra__``. This restores nested-table state that
+        # the codec stack didn't model (e.g. ``statusLine``-shape
+        # extensions, ``permissions`` upstream-introduced fields).
+        if existing is not None:
+            existing_domains, _ = ClaudeAssembler.disassemble(existing)
+            ClaudeAssembler._merge_existing_extras(settings_obj, existing_domains)
+
         dotclaude_obj: dict[str, object] = {}
         if existing is not None and ClaudeAssembler.DOTCLAUDE_JSON in existing:
             loaded = load_json(existing[ClaudeAssembler.DOTCLAUDE_JSON]) or {}
@@ -135,6 +149,26 @@ class ClaudeAssembler:
             ClaudeAssembler.SETTINGS_JSON: dump_json(settings_obj).encode("utf-8"),
             ClaudeAssembler.DOTCLAUDE_JSON: dump_json(dotclaude_obj).encode("utf-8"),
         }
+
+    @staticmethod
+    def _merge_existing_extras(
+        settings_obj: dict[str, object],
+        existing_domains: Mapping[Domains, BaseModel],
+    ) -> None:
+        """Merge extras harvested from existing-disassembled sections
+        onto ``settings_obj`` (the freshly-built settings.json dict).
+
+        Each section's field names already match the wire keys in
+        settings.json (camelCase / Pascalcase). The merge is a single
+        recursive pass per domain — top-level extras (unknown keys at
+        the section root) merge into ``settings_obj`` directly; nested
+        extras (e.g. ``statusLine.foo`` extensions) merge into the
+        corresponding sub-table the codec emitted.
+        """
+        for _domain, section in existing_domains.items():
+            extras = harvest_section_extras(section)
+            if extras:
+                merge_extras_into_dict(settings_obj, extras)
 
     @staticmethod
     def disassemble(  # noqa: PLR0912, PLR0915 — fans across 8 domains plus capabilities multi-file

@@ -69,7 +69,7 @@ class _ClaudeSandbox(BaseModel):
 
 
 class ClaudeAuthorizationSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     permissions: _ClaudePermissions = Field(default_factory=_ClaudePermissions)
     sandbox: _ClaudeSandbox = Field(default_factory=_ClaudeSandbox)
 

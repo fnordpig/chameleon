@@ -56,7 +56,7 @@ class _CodexSandboxWorkspaceWrite(BaseModel):
 
 
 class CodexAuthorizationSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="allow")
     sandbox_mode: str | None = None
     sandbox_workspace_write: _CodexSandboxWorkspaceWrite = Field(
         default_factory=_CodexSandboxWorkspaceWrite
