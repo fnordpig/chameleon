@@ -1,0 +1,1122 @@
+{
+  "$defs": {
+    "AuthMethod": {
+      "description": "How Chameleon expects the operator to authenticate to the target.",
+      "enum": [
+        "oauth",
+        "api-key",
+        "bedrock",
+        "vertex",
+        "azure"
+      ],
+      "title": "AuthMethod",
+      "type": "string"
+    },
+    "Authorization": {
+      "additionalProperties": false,
+      "description": "V0: typed schema only; codecs deferred to follow-on spec (\u00a715.1).",
+      "properties": {
+        "default_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DefaultMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "filesystem": {
+          "$ref": "#/$defs/FilesystemPolicy"
+        },
+        "network": {
+          "$ref": "#/$defs/NetworkPolicy"
+        },
+        "allow_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow Patterns",
+          "type": "array"
+        },
+        "ask_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Ask Patterns",
+          "type": "array"
+        },
+        "deny_patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny Patterns",
+          "type": "array"
+        }
+      },
+      "title": "Authorization",
+      "type": "object"
+    },
+    "Capabilities": {
+      "additionalProperties": false,
+      "description": "What tools/MCP/skills/subagents the agent can use.\n\nV0 codecs cover `mcp_servers` only; remaining fields are typed schema\nwith deferred codec implementation.",
+      "properties": {
+        "mcp_servers": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/McpServerStdio"
+              },
+              {
+                "$ref": "#/$defs/McpServerStreamableHttp"
+              }
+            ]
+          },
+          "title": "Mcp Servers",
+          "type": "object"
+        },
+        "skills": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Skills",
+          "type": "array"
+        },
+        "subagents": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Mapping of subagent name to a config file path.",
+          "title": "Subagents",
+          "type": "object"
+        },
+        "web_search": {
+          "anyOf": [
+            {
+              "enum": [
+                "cached",
+                "live",
+                "disabled"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Web Search"
+        }
+      },
+      "title": "Capabilities",
+      "type": "object"
+    },
+    "DefaultMode": {
+      "enum": [
+        "read-only",
+        "workspace-write",
+        "full-access"
+      ],
+      "title": "DefaultMode",
+      "type": "string"
+    },
+    "Directives": {
+      "additionalProperties": false,
+      "description": "Behaviour-shaping configuration.",
+      "properties": {
+        "system_prompt_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filesystem path to a markdown file used as the agent's system prompt.",
+          "title": "System Prompt File"
+        },
+        "commit_attribution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Commit Attribution"
+        },
+        "output_style": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Style"
+        },
+        "language": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Language"
+        },
+        "personality": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Personality"
+        },
+        "verbosity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Verbosity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "show_thinking_summary": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Show Thinking Summary"
+        }
+      },
+      "title": "Directives",
+      "type": "object"
+    },
+    "Environment": {
+      "additionalProperties": false,
+      "description": "Variables and execution context.\n\nV0 codecs cover `variables` only.",
+      "properties": {
+        "variables": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Variables",
+          "type": "object"
+        },
+        "inherit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InheritPolicy"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "include_only": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Include Only",
+          "type": "array"
+        },
+        "exclude": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        },
+        "additional_directories": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Additional Directories",
+          "type": "array"
+        },
+        "respect_gitignore": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Respect Gitignore"
+        }
+      },
+      "title": "Environment",
+      "type": "object"
+    },
+    "FilesystemPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allow_read": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow Read",
+          "type": "array"
+        },
+        "allow_write": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow Write",
+          "type": "array"
+        },
+        "deny_read": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny Read",
+          "type": "array"
+        },
+        "deny_write": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Deny Write",
+          "type": "array"
+        }
+      },
+      "title": "FilesystemPolicy",
+      "type": "object"
+    },
+    "Governance": {
+      "additionalProperties": false,
+      "properties": {
+        "managed": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Managed",
+          "type": "object"
+        },
+        "trust": {
+          "$ref": "#/$defs/Trust"
+        },
+        "updates": {
+          "$ref": "#/$defs/Updates"
+        },
+        "features": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "title": "Features",
+          "type": "object"
+        }
+      },
+      "title": "Governance",
+      "type": "object"
+    },
+    "History": {
+      "additionalProperties": false,
+      "properties": {
+        "persistence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HistoryPersistence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_bytes": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Bytes"
+        }
+      },
+      "title": "History",
+      "type": "object"
+    },
+    "HistoryPersistence": {
+      "enum": [
+        "save-all",
+        "none"
+      ],
+      "title": "HistoryPersistence",
+      "type": "string"
+    },
+    "Identity": {
+      "additionalProperties": false,
+      "description": "The identity domain \u2014 composed of target-shared and per-target keys.\n\nAll fields are optional so operators can partially configure the\ndomain. Codecs decide what to do when a field is unset.",
+      "properties": {
+        "reasoning_effort": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReasoningEffort"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "thinking": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Thinking"
+        },
+        "service_tier": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Service Tier"
+        },
+        "context_window": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Context Window"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "$ref": "#/$defs/TargetId"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Target-specific model identifier. Must be a mapping TargetId -> model name (e.g. {claude: 'claude-sonnet-4-7'}); scalar values are rejected (\u00a77.1).",
+          "title": "Model"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/IdentityEndpoint"
+        },
+        "auth": {
+          "$ref": "#/$defs/IdentityAuth"
+        }
+      },
+      "title": "Identity",
+      "type": "object"
+    },
+    "IdentityAuth": {
+      "additionalProperties": false,
+      "description": "Authentication configuration.",
+      "properties": {
+        "method": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthMethod"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "api_key_helper": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to an executable that prints an API key on stdout.",
+          "title": "Api Key Helper"
+        }
+      },
+      "title": "IdentityAuth",
+      "type": "object"
+    },
+    "IdentityEndpoint": {
+      "additionalProperties": false,
+      "description": "Per-target endpoint base URL (target-specific by nature).",
+      "properties": {
+        "base_url": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "propertyNames": {
+                "$ref": "#/$defs/TargetId"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
+        }
+      },
+      "title": "IdentityEndpoint",
+      "type": "object"
+    },
+    "InheritPolicy": {
+      "enum": [
+        "all",
+        "core",
+        "none"
+      ],
+      "title": "InheritPolicy",
+      "type": "string"
+    },
+    "Interface": {
+      "additionalProperties": false,
+      "properties": {
+        "fullscreen": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fullscreen"
+        },
+        "theme": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Theme"
+        },
+        "editor_mode": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Editor Mode"
+        },
+        "status_line_command": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Line Command"
+        },
+        "file_opener": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "File Opener"
+        },
+        "voice_enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Voice Enabled"
+        },
+        "motion_reduced": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Motion Reduced"
+        },
+        "notification_channel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notification Channel"
+        }
+      },
+      "title": "Interface",
+      "type": "object"
+    },
+    "JsonValue": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "integer"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "string"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "Lifecycle": {
+      "additionalProperties": false,
+      "description": "V0: typed schema only; codecs deferred.",
+      "properties": {
+        "hooks": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Hooks",
+          "type": "object"
+        },
+        "history": {
+          "$ref": "#/$defs/History"
+        },
+        "telemetry": {
+          "$ref": "#/$defs/Telemetry"
+        },
+        "cleanup_period_days": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cleanup Period Days"
+        }
+      },
+      "title": "Lifecycle",
+      "type": "object"
+    },
+    "McpServerStdio": {
+      "additionalProperties": false,
+      "properties": {
+        "transport": {
+          "const": "stdio",
+          "default": "stdio",
+          "title": "Transport",
+          "type": "string"
+        },
+        "command": {
+          "title": "Command",
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Args",
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Env",
+          "type": "object"
+        },
+        "cwd": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cwd"
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "title": "McpServerStdio",
+      "type": "object"
+    },
+    "McpServerStreamableHttp": {
+      "additionalProperties": false,
+      "properties": {
+        "transport": {
+          "const": "http",
+          "default": "http",
+          "title": "Transport",
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        },
+        "bearer_token_env_var": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bearer Token Env Var"
+        },
+        "http_headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Http Headers",
+          "type": "object"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "McpServerStreamableHttp",
+      "type": "object"
+    },
+    "NetworkPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed_domains": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allowed Domains",
+          "type": "array"
+        },
+        "denied_domains": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Denied Domains",
+          "type": "array"
+        },
+        "allow_local_binding": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Allow Local Binding"
+        },
+        "allow_unix_sockets": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Allow Unix Sockets",
+          "type": "array"
+        }
+      },
+      "title": "NetworkPolicy",
+      "type": "object"
+    },
+    "PassThroughBag": {
+      "additionalProperties": false,
+      "description": "Untyped-at-schema, target-validated-at-codec pass-through container.",
+      "properties": {
+        "items": {
+          "additionalProperties": {
+            "$ref": "#/$defs/JsonValue"
+          },
+          "title": "Items",
+          "type": "object"
+        }
+      },
+      "title": "PassThroughBag",
+      "type": "object"
+    },
+    "Profile": {
+      "additionalProperties": false,
+      "description": "A named overlay; every domain is optional (overlay-only).",
+      "properties": {
+        "identity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Identity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "directives": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Directives"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Capabilities"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "authorization": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Authorization"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Environment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "lifecycle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Lifecycle"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "interface": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Interface"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "governance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Governance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "title": "Profile",
+      "type": "object"
+    },
+    "ReasoningEffort": {
+      "description": "Reasoning effort vocabulary shared by Claude and Codex.",
+      "enum": [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ],
+      "title": "ReasoningEffort",
+      "type": "string"
+    },
+    "TargetId": {
+      "description": "Registry-validated target identifier.\n\nConstruction fails if `value` is not in `_TARGET_REGISTRY`. Tests\nregister names via `register_target_id`; production code registers\nvia the targets-registry entry-point discovery path (the\nregistries-and-target-protocol task).",
+      "properties": {
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "value"
+      ],
+      "title": "TargetId",
+      "type": "object"
+    },
+    "Telemetry": {
+      "additionalProperties": false,
+      "properties": {
+        "exporter": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TelemetryExporter"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "endpoint": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Endpoint"
+        }
+      },
+      "title": "Telemetry",
+      "type": "object"
+    },
+    "TelemetryExporter": {
+      "enum": [
+        "none",
+        "otlp-http",
+        "otlp-grpc"
+      ],
+      "title": "TelemetryExporter",
+      "type": "string"
+    },
+    "Trust": {
+      "additionalProperties": false,
+      "properties": {
+        "trusted_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Trusted Paths",
+          "type": "array"
+        },
+        "untrusted_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Untrusted Paths",
+          "type": "array"
+        }
+      },
+      "title": "Trust",
+      "type": "object"
+    },
+    "Updates": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/UpdatesChannel"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "minimum_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minimum Version"
+        }
+      },
+      "title": "Updates",
+      "type": "object"
+    },
+    "UpdatesChannel": {
+      "enum": [
+        "stable",
+        "latest"
+      ],
+      "title": "UpdatesChannel",
+      "type": "string"
+    },
+    "Verbosity": {
+      "enum": [
+        "low",
+        "medium",
+        "high"
+      ],
+      "title": "Verbosity",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "The complete neutral form.\n\nTop-level fields are the implicit base profile. `profiles` holds\nnamed overlays; `targets` holds per-target pass-through bags.",
+  "properties": {
+    "schema_version": {
+      "const": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "identity": {
+      "$ref": "#/$defs/Identity"
+    },
+    "directives": {
+      "$ref": "#/$defs/Directives"
+    },
+    "capabilities": {
+      "$ref": "#/$defs/Capabilities"
+    },
+    "authorization": {
+      "$ref": "#/$defs/Authorization"
+    },
+    "environment": {
+      "$ref": "#/$defs/Environment"
+    },
+    "lifecycle": {
+      "$ref": "#/$defs/Lifecycle"
+    },
+    "interface": {
+      "$ref": "#/$defs/Interface"
+    },
+    "governance": {
+      "$ref": "#/$defs/Governance"
+    },
+    "profiles": {
+      "additionalProperties": {
+        "$ref": "#/$defs/Profile"
+      },
+      "title": "Profiles",
+      "type": "object"
+    },
+    "targets": {
+      "additionalProperties": {
+        "$ref": "#/$defs/PassThroughBag"
+      },
+      "propertyNames": {
+        "$ref": "#/$defs/TargetId"
+      },
+      "title": "Targets",
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version"
+  ],
+  "title": "Neutral",
+  "type": "object"
+}
