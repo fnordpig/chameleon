@@ -12,15 +12,46 @@ across tools.
 
 ## Status
 
-Pre-1.0 but functional end-to-end. All eight schema domains —
-`identity`, `directives`, `capabilities`, `environment`,
-`authorization`, `lifecycle`, `interface`, `governance` — have working
-codecs for both targets, with documented `LossWarning`s where the two
-targets genuinely diverge. The richer authorization surface (Claude's
-`Bash(...)` permission patterns ↔ Codex's named `[permissions.<name>]`
-profiles) ships as `LossWarning`-only for now and gets its own design
-spec. See `CHANGELOG.md` for the full V0+ delta and `docs/superpowers/
-specs/2026-05-05-chameleon-design.md` for the architecture.
+**0.2.0 — pre-1.0, functional end-to-end, real acceptance gate.**
+
+All eight schema domains — `identity`, `directives`, `capabilities`,
+`environment`, `authorization`, `lifecycle`, `interface`,
+`governance` — have working codecs for both targets, with documented
+`LossWarning`s where the two targets genuinely diverge. The richer
+authorization surface (Claude's `Bash(...)` permission patterns ↔
+Codex's named `[permissions.<name>]` profiles) ships as
+`LossWarning`-only for now and gets its own design spec.
+
+The test suite is **286 passing + 5 strict xfails**. The xfails pin
+declared-future-work contracts (transaction-marker engine wiring; two
+sub-table preservation findings F1/F2) so a fix that incidentally
+satisfies them fails CI loudly until the xfail is removed. See
+`CHANGELOG.md` for the per-wave breakdown and `docs/superpowers/specs/2026-05-05-chameleon-design.md`
+for the architecture.
+
+### What's verified end-to-end
+
+`tests/integration/test_exemplar_byte_roundtrip.py` runs the full
+operator workflow against a sanitized real-world Claude+Codex exemplar
+(`tests/fixtures/exemplar/`) and asserts:
+
+- **Semantic round-trip.** `chameleon init && chameleon merge
+  --on-conflict=keep` on the live Claude `settings.json`, Codex
+  `config.toml`, and `~/.claude.json` produces the same semantic
+  content modulo the documented Wave-5 transforms (P1-D
+  legacy-attribution consolidation, P1-A capabilities reconciliation
+  union, B2 sorted-by-key dict ordering, cosmetic empty blocks).
+- **Byte-stable idempotency.** Two consecutive `keep`-merges produce
+  byte-identical target files.
+- **Full Unicode preservation.** Every non-ASCII codepoint in the
+  original `~/.claude.json` survives the merge.
+- **Zero unexpected pass-through.** After Wave-4, every claimed key
+  has a real codec — `targets.<target>.items` is empty after
+  round-trip.
+
+`tests/integration/test_login_recipes.py` pins the login recipes
+shipped in `docs/login/*.md` to the live CLI surface so the published
+invocations don't drift.
 
 ## Why YAML?
 
@@ -82,7 +113,9 @@ last-known-good, or skip. Non-interactive runs use
 | `chameleon validate` | Lint the neutral file against the Pydantic schema |
 | `chameleon doctor` | Surface stale transaction markers and login-time notices |
 | `chameleon targets list` | List registered targets (built-ins + plugins) |
-| `chameleon diff` / `discard` | V0 stubs — full semantics deferred |
+| `chameleon diff` | Unified diff of live targets vs. re-derived projection of neutral |
+| `chameleon discard <target>` | Revert a target's live file to its state-repo HEAD |
+| `chameleon merge --dry-run` | Run the full pipeline and emit the diff without writing |
 
 ## Login-time integration
 
