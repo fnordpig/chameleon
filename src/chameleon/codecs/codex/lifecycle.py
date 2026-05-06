@@ -14,7 +14,22 @@ from pydantic import BaseModel, ConfigDict, Field
 from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
-from chameleon.schema.lifecycle import History, HistoryPersistence, Lifecycle
+from chameleon.schema.lifecycle import History, HistoryPersistence, Hooks, Lifecycle
+
+
+def _hooks_has_any_event(hooks: Hooks) -> bool:
+    """True iff the operator set any hook event in neutral.
+
+    A bare ``Hooks()`` instance is the V0 default and means "no hooks
+    configured" — emitting a LossWarning for it would be noise. Any
+    explicitly-set event (or any extras carried via ``extra="allow"``)
+    is real operator data we cannot propagate to Codex today.
+    """
+    for field_name in Hooks.model_fields:
+        if getattr(hooks, field_name) is not None:
+            return True
+    extras = getattr(hooks, "model_extra", None) or {}
+    return bool(extras)
 
 
 class _CodexHistory(BaseModel):
@@ -54,12 +69,16 @@ class CodexLifecycleCodec:
                     message="lifecycle.cleanup_period_days has no Codex equivalent (§15.2)",
                 )
             )
-        if model.hooks:
+        if _hooks_has_any_event(model.hooks):
             ctx.warn(
                 LossWarning(
                     domain=Domains.LIFECYCLE,
                     target=BUILTIN_CODEX,
-                    message="lifecycle.hooks not propagated to Codex in V0 (§15.2)",
+                    message=(
+                        "lifecycle.hooks not propagated to Codex (P1-B): Codex "
+                        "does not currently expose a hooks ABI; a real Codex "
+                        "hooks codec lands once upstream publishes a schema"
+                    ),
                 )
             )
         return section

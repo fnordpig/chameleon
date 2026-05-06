@@ -92,13 +92,13 @@ def test_passthrough_survives_deleted_live_file(
     paths = _setup_env(monkeypatch, tmp_path)
 
     # Pre-seed a live ~/.claude/settings.json with a key Chameleon doesn't
-    # claim. `hooks` is still unclaimed at P1-A (next codec lane is P1-B).
-    # When P1-B lands, swap to whichever key remains unclaimed at that time.
+    # claim. ``voice`` (the object, P1-C in parity-gap.md) is still
+    # unclaimed — only the ``voiceEnabled`` boolean is. When P1-C lands,
+    # swap to whichever key remains unclaimed at that time.
     live_settings = paths["home"] / ".claude" / "settings.json"
     live_settings.parent.mkdir(parents=True, exist_ok=True)
     live_settings.write_text(
-        '{"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": '
-        '[{"type": "command", "command": "rtk hook claude"}]}]}}\n',
+        '{"voice": {"enabled": false, "mode": "hold"}}\n',
         encoding="utf-8",
     )
 
@@ -115,8 +115,8 @@ def test_passthrough_survives_deleted_live_file(
     n = Neutral.model_validate(neutral_doc_obj)
     claude_bag = n.targets.get(BUILTIN_CLAUDE)
     assert claude_bag is not None, "neutral missing targets.claude after first merge"
-    assert "hooks" in claude_bag.items, (
-        f"expected hooks in neutral.targets.claude.items; got items={claude_bag.items!r}"
+    assert "voice" in claude_bag.items, (
+        f"expected voice in neutral.targets.claude.items; got items={claude_bag.items!r}"
     )
 
     # Operator deletes the live file (e.g. machine wipe / fresh install).
@@ -130,11 +130,7 @@ def test_passthrough_survives_deleted_live_file(
     assert cli.main(["merge", "--on-conflict=fail"]) == 0
     assert live_settings.exists()
     settings = load_json(live_settings)
-    assert "hooks" in settings, (
+    assert "voice" in settings, (
         f"unclaimed key was lost on re-derive from neutral alone; got {settings!r}"
     )
-    assert settings["hooks"] == {
-        "PreToolUse": [
-            {"matcher": "Bash", "hooks": [{"type": "command", "command": "rtk hook claude"}]}
-        ]
-    }
+    assert settings["voice"] == {"enabled": False, "mode": "hold"}

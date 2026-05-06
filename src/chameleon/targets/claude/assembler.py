@@ -162,7 +162,10 @@ class ClaudeAssembler:
         }
         environment_keys = {"env"}
         authorization_keys = {"permissions", "sandbox"}
-        lifecycle_keys = {"cleanupPeriodDays"}
+        # ``hooks`` is the event-keyed hook bindings object (P1-B,
+        # parity-gap.md). Routing it here means the lifecycle codec —
+        # not the pass-through bag — owns the operator's hook config.
+        lifecycle_keys = {"cleanupPeriodDays", "hooks"}
         interface_keys = {
             "tui",
             "statusLine",
