@@ -16,7 +16,14 @@ from chameleon import __version__
 from chameleon._types import TargetId
 from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge.engine import MergeEngine, MergeRequest
-from chameleon.merge.resolve import Strategy, on_conflict_to_strategy
+from chameleon.merge.resolve import (
+    InteractiveResolver,
+    NonInteractiveResolver,
+    Resolver,
+    Strategy,
+    on_conflict_to_strategy,
+    stdin_is_a_tty,
+)
 from chameleon.schema._constants import OnConflict
 from chameleon.schema.neutral import Neutral
 from chameleon.state.git import GitRepo
@@ -114,11 +121,25 @@ def _cmd_init(args: argparse.Namespace) -> int:
     return result.exit_code
 
 
+def _resolver_from_args(args: argparse.Namespace) -> Resolver:
+    """Pick a Resolver based on --on-conflict and TTY presence.
+
+    The operator can force a non-interactive strategy with --on-conflict;
+    otherwise interactive resolution is used when stdin is a TTY (for
+    login-time / CI / pipe contexts the FAIL strategy applies).
+    """
+    raw = args.on_conflict
+    explicit = raw != "fail" or not stdin_is_a_tty()
+    if explicit or not stdin_is_a_tty():
+        return NonInteractiveResolver(on_conflict_to_strategy(raw))
+    return InteractiveResolver()
+
+
 def _cmd_merge(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     targets = TargetRegistry.discover()
-    strategy = on_conflict_to_strategy(args.on_conflict)
-    engine = MergeEngine(targets=targets, paths=paths, strategy=strategy)
+    resolver = _resolver_from_args(args)
+    engine = MergeEngine(targets=targets, paths=paths, resolver=resolver)
     result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
     sys.stdout.write(result.summary + "\n")
     return result.exit_code

@@ -18,10 +18,14 @@ from pydantic import BaseModel
 
 from chameleon._types import FileFormat, FileOwnership, FileSpec, TargetId
 from chameleon.codecs.claude import ClaudeSettings
+from chameleon.codecs.claude.authorization import ClaudeAuthorizationSection
 from chameleon.codecs.claude.capabilities import ClaudeCapabilitiesSection
 from chameleon.codecs.claude.directives import ClaudeDirectivesSection
 from chameleon.codecs.claude.environment import ClaudeEnvironmentSection
+from chameleon.codecs.claude.governance import ClaudeGovernanceSection
 from chameleon.codecs.claude.identity import ClaudeIdentitySection
+from chameleon.codecs.claude.interface import ClaudeInterfaceSection
+from chameleon.codecs.claude.lifecycle import ClaudeLifecycleSection
 from chameleon.io.json import dump_json, load_json
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 
@@ -54,7 +58,7 @@ class ClaudeAssembler:
     full_model: ClassVar[type[BaseModel]] = ClaudeSettings
 
     @staticmethod
-    def assemble(
+    def assemble(  # noqa: PLR0912 — fans out across 8 domains by design
         per_domain: Mapping[Domains, BaseModel],
         passthrough: Mapping[str, object],
         *,
@@ -75,6 +79,26 @@ class ClaudeAssembler:
         environment = per_domain.get(Domains.ENVIRONMENT)
         if isinstance(environment, ClaudeEnvironmentSection):
             settings_obj.update(environment.model_dump(exclude_none=True))
+
+        authorization = per_domain.get(Domains.AUTHORIZATION)
+        if isinstance(authorization, ClaudeAuthorizationSection):
+            for k, v in authorization.model_dump(exclude_none=True, exclude_defaults=True).items():
+                settings_obj[k] = v
+
+        lifecycle = per_domain.get(Domains.LIFECYCLE)
+        if isinstance(lifecycle, ClaudeLifecycleSection):
+            for k, v in lifecycle.model_dump(exclude_none=True).items():
+                settings_obj[k] = v
+
+        interface = per_domain.get(Domains.INTERFACE)
+        if isinstance(interface, ClaudeInterfaceSection):
+            for k, v in interface.model_dump(exclude_none=True, exclude_defaults=True).items():
+                settings_obj[k] = v
+
+        governance = per_domain.get(Domains.GOVERNANCE)
+        if isinstance(governance, ClaudeGovernanceSection):
+            for k, v in governance.model_dump(exclude_none=True).items():
+                settings_obj[k] = v
 
         capabilities = per_domain.get(Domains.CAPABILITIES)
         dotclaude_overlay: dict[str, object] = {}
@@ -115,6 +139,15 @@ class ClaudeAssembler:
         identity_keys = {"model", "effortLevel", "alwaysThinkingEnabled"}
         directives_keys = {"outputStyle", "attribution"}
         environment_keys = {"env"}
+        authorization_keys = {"permissions", "sandbox"}
+        lifecycle_keys = {"cleanupPeriodDays"}
+        interface_keys = {
+            "tui",
+            "statusLine",
+            "voiceEnabled",
+            "prefersReducedMotion",
+        }
+        governance_keys = {"autoUpdatesChannel", "minimumVersion"}
 
         identity_obj = {k: v for k, v in settings.items() if k in identity_keys}
         if identity_obj:
@@ -127,8 +160,30 @@ class ClaudeAssembler:
             per_domain[Domains.ENVIRONMENT] = ClaudeEnvironmentSection.model_validate(
                 environment_obj
             )
+        authorization_obj = {k: v for k, v in settings.items() if k in authorization_keys}
+        if authorization_obj:
+            per_domain[Domains.AUTHORIZATION] = ClaudeAuthorizationSection.model_validate(
+                authorization_obj
+            )
+        lifecycle_obj = {k: v for k, v in settings.items() if k in lifecycle_keys}
+        if lifecycle_obj:
+            per_domain[Domains.LIFECYCLE] = ClaudeLifecycleSection.model_validate(lifecycle_obj)
+        interface_obj = {k: v for k, v in settings.items() if k in interface_keys}
+        if interface_obj:
+            per_domain[Domains.INTERFACE] = ClaudeInterfaceSection.model_validate(interface_obj)
+        governance_obj = {k: v for k, v in settings.items() if k in governance_keys}
+        if governance_obj:
+            per_domain[Domains.GOVERNANCE] = ClaudeGovernanceSection.model_validate(governance_obj)
 
-        claimed = identity_keys | directives_keys | environment_keys
+        claimed = (
+            identity_keys
+            | directives_keys
+            | environment_keys
+            | authorization_keys
+            | lifecycle_keys
+            | interface_keys
+            | governance_keys
+        )
         for k, v in settings.items():
             if k not in claimed:
                 passthrough[k] = v

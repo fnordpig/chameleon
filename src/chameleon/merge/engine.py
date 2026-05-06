@@ -27,7 +27,7 @@ from chameleon.merge.changeset import (
     classify_change,
 )
 from chameleon.merge.conflict import Conflict
-from chameleon.merge.resolve import NonInteractiveResolver, Strategy
+from chameleon.merge.resolve import NonInteractiveResolver, Resolver, Strategy
 from chameleon.schema._constants import Domains
 from chameleon.schema.neutral import Neutral
 from chameleon.state.git import GitRepo
@@ -64,11 +64,20 @@ class MergeEngine:
         self,
         targets: TargetRegistry,
         paths: StatePaths,
-        strategy: Strategy,
+        strategy: Strategy | None = None,
+        *,
+        resolver: Resolver | None = None,
     ) -> None:
+        if resolver is None and strategy is None:
+            msg = "MergeEngine requires either a strategy or a resolver"
+            raise ValueError(msg)
         self.targets = targets
         self.paths = paths
-        self.strategy = strategy
+        if resolver is not None:
+            self._resolver: Resolver = resolver
+        else:
+            assert strategy is not None  # narrows for the type checker
+            self._resolver = NonInteractiveResolver(strategy)
         self.tx_store = TransactionStore(paths.tx_dir)
 
     def _read_live_files(self, target_cls: type[Target]) -> dict[str, bytes]:
@@ -158,10 +167,9 @@ class MergeEngine:
                 src_neutral = per_target_neutral[cl.winning_target]
                 setattr(composed, domain.value, getattr(src_neutral, domain.value))
 
-        # 6. Resolve conflicts non-interactively
-        resolver = NonInteractiveResolver(self.strategy)
+        # 6. Resolve conflicts via the configured resolver
         for c in conflicts:
-            resolved = resolver.resolve(c)
+            resolved = self._resolver.resolve(c)
             if resolved is None:
                 continue
             domain_cls = type(getattr(composed, c.record.domain.value))

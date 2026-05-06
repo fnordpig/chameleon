@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
-from typing import Any
+import sys
+from typing import Any, Protocol
 
 from pydantic import BaseModel, ConfigDict
+from rich.console import Console
+from rich.prompt import Prompt
+from rich.table import Table
 
 from chameleon._types import TargetId
+from chameleon.merge.changeset import ChangeSource
 from chameleon.merge.conflict import Conflict
 from chameleon.schema._constants import OnConflict
+
+
+class Resolver(Protocol):
+    """A resolver returns the chosen value (Any), None to skip, or raises."""
+
+    def resolve(self, conflict: Conflict) -> Any: ...
 
 
 class Strategy(BaseModel):
@@ -66,4 +77,85 @@ class NonInteractiveResolver:
         raise RuntimeError(msg)
 
 
-__all__ = ["NonInteractiveResolver", "Strategy", "on_conflict_to_strategy"]
+class InteractiveResolver:
+    """Prompt the operator on a TTY for each conflict, per design spec §5.1.
+
+    Renders the four sources (was/now/per-target) as a table and accepts
+    a single-character choice: [n] take neutral, [a]/[b] take a target,
+    [k] revert to N₀ (last-known-good), [s] skip (leave unresolved).
+    """
+
+    def __init__(self, console: Console | None = None) -> None:
+        self.console = console or Console(stderr=True)
+
+    def resolve(self, conflict: Conflict) -> Any:
+        record = conflict.record
+        path_label = f"{record.domain.value}.{record.path.render()}"
+
+        # Render the four sources with letter codes
+        table = Table(
+            title=f"[bold red]conflict[/] on [cyan]{path_label}[/]",
+            title_justify="left",
+            show_header=True,
+            header_style="bold",
+        )
+        table.add_column("key", style="dim")
+        table.add_column("source")
+        table.add_column("value")
+
+        choices: dict[str, tuple[ChangeSource, TargetId | None, Any]] = {}
+        # N₀ context
+        table.add_row("·", "was (N₀)", repr(record.n0))
+        # N₁ if changed
+        if record.n1 != record.n0:
+            choices["n"] = (ChangeSource.NEUTRAL, None, record.n1)
+            table.add_row("[bold]n[/]", "neutral (N₁)", repr(record.n1))
+        # Per-target if changed
+        letter_pool = ["a", "b", "c", "d", "e", "f"]
+        used = set(choices.keys())
+        for tid, val in record.per_target.items():
+            if val == record.n0:
+                # Unchanged from N₀ — show as context, not a choice
+                table.add_row("·", f"{tid.value} (unchanged)", repr(val))
+                continue
+            for letter in letter_pool:
+                if letter not in used:
+                    choices[letter] = (ChangeSource.TARGET, tid, val)
+                    used.add(letter)
+                    table.add_row(f"[bold]{letter}[/]", tid.value, repr(val))
+                    break
+
+        self.console.print(table)
+        self.console.print(
+            "[dim]choose: "
+            + " / ".join(f"[bold]{letter}[/]" for letter in choices)
+            + " / [bold]k[/] revert to N₀ / [bold]s[/] skip[/]"
+        )
+
+        valid = [*choices.keys(), "k", "s"]
+        choice = Prompt.ask(
+            f"resolve [cyan]{path_label}[/]",
+            choices=valid,
+            console=self.console,
+        )
+
+        if choice == "s":
+            return None
+        if choice == "k":
+            return record.n0
+        return choices[choice][2]
+
+
+def stdin_is_a_tty() -> bool:
+    """Whether stdin attaches to a TTY (used to gate interactive resolvers)."""
+    return sys.stdin.isatty()
+
+
+__all__ = [
+    "InteractiveResolver",
+    "NonInteractiveResolver",
+    "Resolver",
+    "Strategy",
+    "on_conflict_to_strategy",
+    "stdin_is_a_tty",
+]

@@ -14,3 +14,5 @@ htmlcov/
 .idea/
 .DS_Store
 target/
+# Auto-managed codex-rs checkout for sync-schemas/sync.py codex
+vendor/

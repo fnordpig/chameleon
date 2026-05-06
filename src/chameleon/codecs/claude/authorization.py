@@ -1,36 +1,177 @@
-"""STUB: Claude authorization codec — implementation deferred to follow-on spec (§15.1)."""
+"""Claude codec for the authorization domain.
+
+V0 thin slice:
+  default_mode                          ↔ permissions.defaultMode
+                                          + sandbox.enabled (full-access → False)
+  filesystem.{allow,deny}_{read,write}  ↔ sandbox.filesystem.{allow,deny}{Read,Write}
+  network.{allowed,denied}_domains      ↔ sandbox.network.{allowed,denied}Domains
+  network.allow_local_binding           ↔ sandbox.network.allowLocalBinding
+  allow_patterns                        ↔ permissions.allow
+  ask_patterns                          ↔ permissions.ask
+  deny_patterns                         ↔ permissions.deny
+
+Mapping rationale (and known asymmetries):
+  - neutral.default_mode "read-only"      → defaultMode "default"      + sandbox.enabled True
+  - neutral.default_mode "workspace-write"→ defaultMode "acceptEdits"  + sandbox.enabled True
+  - neutral.default_mode "full-access"    → defaultMode "bypassPermissions" + sandbox.enabled False
+  Reverse uses the same table; unrecognized values warn and drop.
+
+This is the V0 codec for §15.1 — the full design (granular approval
+policy, additional_directories, named permission profiles) lands in
+the authorization spec.
+"""
 
 from __future__ import annotations
 
 from typing import ClassVar
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
-from chameleon.codecs._protocol import TranspileCtx
+from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
-from chameleon.schema.authorization import Authorization
+from chameleon.schema.authorization import (
+    Authorization,
+    DefaultMode,
+    FilesystemPolicy,
+    NetworkPolicy,
+)
+
+
+class _ClaudePermissions(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    allow: list[str] = Field(default_factory=list)
+    ask: list[str] = Field(default_factory=list)
+    deny: list[str] = Field(default_factory=list)
+    defaultMode: str | None = None  # noqa: N815
+
+
+class _ClaudeSandboxFilesystem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    allowRead: list[str] = Field(default_factory=list)  # noqa: N815
+    allowWrite: list[str] = Field(default_factory=list)  # noqa: N815
+    denyRead: list[str] = Field(default_factory=list)  # noqa: N815
+    denyWrite: list[str] = Field(default_factory=list)  # noqa: N815
+
+
+class _ClaudeSandboxNetwork(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    allowedDomains: list[str] = Field(default_factory=list)  # noqa: N815
+    deniedDomains: list[str] = Field(default_factory=list)  # noqa: N815
+    allowLocalBinding: bool | None = None  # noqa: N815
+
+
+class _ClaudeSandbox(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    enabled: bool | None = None
+    filesystem: _ClaudeSandboxFilesystem = Field(default_factory=_ClaudeSandboxFilesystem)
+    network: _ClaudeSandboxNetwork = Field(default_factory=_ClaudeSandboxNetwork)
 
 
 class ClaudeAuthorizationSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    permissions: _ClaudePermissions = Field(default_factory=_ClaudePermissions)
+    sandbox: _ClaudeSandbox = Field(default_factory=_ClaudeSandbox)
+
+
+_DEFAULT_MODE_TO_CLAUDE: dict[DefaultMode, tuple[str, bool]] = {
+    DefaultMode.READ_ONLY: ("default", True),
+    DefaultMode.WORKSPACE_WRITE: ("acceptEdits", True),
+    DefaultMode.FULL_ACCESS: ("bypassPermissions", False),
+}
+_CLAUDE_TO_DEFAULT_MODE: dict[str, DefaultMode] = {
+    "default": DefaultMode.READ_ONLY,
+    "acceptEdits": DefaultMode.WORKSPACE_WRITE,
+    "bypassPermissions": DefaultMode.FULL_ACCESS,
+}
 
 
 class ClaudeAuthorizationCodec:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
     domain: ClassVar[Domains] = Domains.AUTHORIZATION
     target_section: ClassVar[type[BaseModel]] = ClaudeAuthorizationSection
-    claimed_paths: ClassVar[frozenset[FieldPath]] = frozenset()
+    claimed_paths: ClassVar[frozenset[FieldPath]] = frozenset(
+        {
+            FieldPath(segments=("permissions", "allow")),
+            FieldPath(segments=("permissions", "ask")),
+            FieldPath(segments=("permissions", "deny")),
+            FieldPath(segments=("permissions", "defaultMode")),
+            FieldPath(segments=("sandbox", "enabled")),
+            FieldPath(segments=("sandbox", "filesystem", "allowRead")),
+            FieldPath(segments=("sandbox", "filesystem", "allowWrite")),
+            FieldPath(segments=("sandbox", "filesystem", "denyRead")),
+            FieldPath(segments=("sandbox", "filesystem", "denyWrite")),
+            FieldPath(segments=("sandbox", "network", "allowedDomains")),
+            FieldPath(segments=("sandbox", "network", "deniedDomains")),
+            FieldPath(segments=("sandbox", "network", "allowLocalBinding")),
+        }
+    )
 
     @staticmethod
     def to_target(model: Authorization, ctx: TranspileCtx) -> ClaudeAuthorizationSection:
-        msg = "Claude authorization codec deferred to follow-on spec (§15.1)"
-        raise NotImplementedError(msg)
+        section = ClaudeAuthorizationSection()
+        if model.default_mode is not None:
+            mode, sandbox_enabled = _DEFAULT_MODE_TO_CLAUDE[model.default_mode]
+            section.permissions.defaultMode = mode
+            section.sandbox.enabled = sandbox_enabled
+        section.permissions.allow = list(model.allow_patterns)
+        section.permissions.ask = list(model.ask_patterns)
+        section.permissions.deny = list(model.deny_patterns)
+        section.sandbox.filesystem.allowRead = list(model.filesystem.allow_read)
+        section.sandbox.filesystem.allowWrite = list(model.filesystem.allow_write)
+        section.sandbox.filesystem.denyRead = list(model.filesystem.deny_read)
+        section.sandbox.filesystem.denyWrite = list(model.filesystem.deny_write)
+        section.sandbox.network.allowedDomains = list(model.network.allowed_domains)
+        section.sandbox.network.deniedDomains = list(model.network.denied_domains)
+        if model.network.allow_local_binding is not None:
+            section.sandbox.network.allowLocalBinding = model.network.allow_local_binding
+        if model.network.allow_unix_sockets:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.AUTHORIZATION,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "network.allow_unix_sockets — handled via "
+                        "sandbox.network.allowUnixSockets in Claude; deferred"
+                    ),
+                )
+            )
+        return section
 
     @staticmethod
     def from_target(section: ClaudeAuthorizationSection, ctx: TranspileCtx) -> Authorization:
-        msg = "Claude authorization codec deferred to follow-on spec (§15.1)"
-        raise NotImplementedError(msg)
+        auth = Authorization()
+        if section.permissions.defaultMode is not None:
+            mapped = _CLAUDE_TO_DEFAULT_MODE.get(section.permissions.defaultMode)
+            if mapped is not None:
+                auth.default_mode = mapped
+            else:
+                ctx.warn(
+                    LossWarning(
+                        domain=Domains.AUTHORIZATION,
+                        target=BUILTIN_CLAUDE,
+                        message=(
+                            f"permissions.defaultMode "
+                            f"{section.permissions.defaultMode!r} has no neutral "
+                            f"equivalent in V0 (§15.1)"
+                        ),
+                    )
+                )
+        auth.allow_patterns = list(section.permissions.allow)
+        auth.ask_patterns = list(section.permissions.ask)
+        auth.deny_patterns = list(section.permissions.deny)
+        auth.filesystem = FilesystemPolicy(
+            allow_read=list(section.sandbox.filesystem.allowRead),
+            allow_write=list(section.sandbox.filesystem.allowWrite),
+            deny_read=list(section.sandbox.filesystem.denyRead),
+            deny_write=list(section.sandbox.filesystem.denyWrite),
+        )
+        auth.network = NetworkPolicy(
+            allowed_domains=list(section.sandbox.network.allowedDomains),
+            denied_domains=list(section.sandbox.network.deniedDomains),
+            allow_local_binding=section.sandbox.network.allowLocalBinding,
+        )
+        return auth
 
 
 __all__ = ["ClaudeAuthorizationCodec", "ClaudeAuthorizationSection"]

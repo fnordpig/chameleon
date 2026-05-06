@@ -92,31 +92,52 @@ def sync_claude(pins: dict[str, object]) -> int:
     return 0
 
 
-def sync_codex(pins: dict[str, object]) -> int:
-    """Generate codex/_generated.py from a local codex-rs checkout.
+VENDOR_DIR: Path = REPO_ROOT / "vendor" / "codex-rs"
 
-    NOTE: As of codex-rs ~35aaa5d, the standalone Rust binary at
-    tools/sync-schemas/codex/ cannot be built via plain `cargo build`
-    because its git-dependency on codex-config transitively pulls in
-    codex-otel, which requires a tokio-tungstenite `proxy` feature
-    that the published 0.28.0 release does not have. The codex-rs
-    workspace works around this with its own Cargo.lock pinning a
-    forked tokio-tungstenite, but that lockfile is not consulted
-    when codex-config is fetched as an external git dep.
 
-    Workaround for V0: require an environment variable
-    `CODEX_RS_PATH` pointing at a local codex-rs checkout. Drop a
-    one-shot `dump-schema-chameleon.rs` example into that checkout's
-    codex-rs/config/examples/ directory, run it via
-    `cargo run --release --example dump-schema-chameleon`, capture
-    stdout, then delete the example.
+def _ensure_codex_rs_clone(git_url: str, git_sha: str) -> Path:
+    """Ensure vendor/codex-rs/ is a checkout at the pinned SHA.
 
-    A future iteration of the standalone binary plus updated codex-rs
-    pin should make the standalone path work; until then this
-    fallback keeps codex codegen reproducible.
+    Self-contained: clones if missing, fetches+checkouts on SHA mismatch.
+    No operator-managed CODEX_RS_PATH required. The vendor dir is gitignored.
     """
-    import os
+    git = shutil.which("git")
+    if git is None:
+        msg = "codex sync requires git on PATH"
+        raise RuntimeError(msg)
 
+    if not (VENDOR_DIR / ".git").exists():
+        VENDOR_DIR.parent.mkdir(parents=True, exist_ok=True)
+        sys.stderr.write(f"[codex] cloning {git_url} into {VENDOR_DIR}\n")
+        # blob:none filter keeps the checkout small; we only need source code
+        subprocess.run(
+            [git, "clone", "--filter=blob:none", git_url, str(VENDOR_DIR)],
+            check=True,
+        )
+
+    current = subprocess.check_output(
+        [git, "-C", str(VENDOR_DIR), "rev-parse", "HEAD"], text=True
+    ).strip()
+    if current != git_sha:
+        sys.stderr.write(f"[codex] fetching + checking out {git_sha}\n")
+        subprocess.run([git, "-C", str(VENDOR_DIR), "fetch", "origin", git_sha], check=True)
+        subprocess.run([git, "-C", str(VENDOR_DIR), "checkout", "--detach", git_sha], check=True)
+
+    return VENDOR_DIR
+
+
+def sync_codex(pins: dict[str, object]) -> int:
+    """Generate codex/_generated.py from an auto-managed codex-rs checkout.
+
+    Self-contained pipeline: clones codex-rs into vendor/codex-rs/ at the
+    pinned SHA (gitignored), drops a one-shot
+    `dump-schema-chameleon.rs` into its config/examples/ directory, runs
+    `cargo run --release --example dump-schema-chameleon` inside that
+    workspace (so codex-rs's Cargo.lock is in scope), captures stdout,
+    then deletes the example. The standalone Rust binary at
+    tools/sync-schemas/codex/ remains for documentation but is bypassed
+    in favour of this lock-file-aware path.
+    """
     section = pins["codex"]
     assert isinstance(section, dict)
     git_sha = section["git_sha"]
@@ -131,25 +152,18 @@ def sync_codex(pins: dict[str, object]) -> int:
         sys.stderr.write("codex sync requires cargo + Rust toolchain; install rustup and re-run.\n")
         return 3
 
-    codex_rs_path = os.environ.get("CODEX_RS_PATH")
-    if not codex_rs_path:
-        sys.stderr.write(
-            "codex sync requires CODEX_RS_PATH env var pointing at a local codex-rs\n"
-            "checkout (e.g. CODEX_RS_PATH=~/src/openai/codex). The standalone Rust\n"
-            "binary at tools/sync-schemas/codex/ cannot resolve transitive deps via\n"
-            "git fetch alone — see comment in sync_codex() for details.\n"
-        )
-        return 4
+    git_url = section.get("git_url", "https://github.com/openai/codex.git")
+    assert isinstance(git_url, str)
+    assert isinstance(git_sha, str)
 
-    codex_rs = Path(os.path.expanduser(codex_rs_path)).resolve()
-    if not (codex_rs / "codex-rs" / "config" / "Cargo.toml").exists():
+    codex_rs = _ensure_codex_rs_clone(git_url, git_sha)
+    config_dir = codex_rs / "codex-rs" / "config"
+    if not (config_dir / "Cargo.toml").exists():
         sys.stderr.write(
-            f"CODEX_RS_PATH={codex_rs} does not contain codex-rs/config/Cargo.toml; "
-            "is this a codex-rs checkout?\n"
+            f"vendored codex-rs at {codex_rs} does not contain codex-rs/config/Cargo.toml; "
+            "the checkout may be incomplete or the layout changed.\n"
         )
         return 5
-
-    config_dir = codex_rs / "codex-rs" / "config"
     examples_dir = config_dir / "examples"
     example_file = examples_dir / "dump-schema-chameleon.rs"
 
