@@ -107,6 +107,25 @@ class GitRepo:
             return None
         return result.stdout.strip()
 
+    def read_at_head(self, repo_path: str) -> bytes | None:
+        """Return the raw bytes of `repo_path` at HEAD, or None if absent.
+
+        `repo_path` is repo-relative (e.g. `settings/settings.json`). Returns
+        None when there's no HEAD yet, when the path isn't tracked at HEAD,
+        or when the blob is unreadable. Uses `git show HEAD:<path>` with
+        binary output so non-UTF8 blobs round-trip cleanly.
+        """
+        if self.head_commit() is None:
+            return None
+        result = subprocess.run(
+            [self._git(), "-C", str(self.path), "show", f"HEAD:{repo_path}"],
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout
+
     def is_clean(self) -> bool:
         out = subprocess.run(
             [self._git(), "-C", str(self.path), "status", "--porcelain"],

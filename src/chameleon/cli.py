@@ -8,13 +8,19 @@ downstream.
 from __future__ import annotations
 
 import argparse
+import json
+import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
+from rich.console import Console
+from rich.prompt import Confirm
+
 from chameleon import __version__
-from chameleon._types import TargetId
+from chameleon._types import FileOwnership, TargetId
 from chameleon.io.yaml import dump_yaml, load_yaml
+from chameleon.merge.drift import unified_diff
 from chameleon.merge.engine import MergeEngine, MergeRequest
 from chameleon.merge.resolve import (
     InteractiveResolver,
@@ -27,9 +33,11 @@ from chameleon.merge.resolve import (
 from chameleon.schema._constants import OnConflict
 from chameleon.schema.neutral import Neutral
 from chameleon.state.git import GitRepo
+from chameleon.state.locks import partial_owned_write
 from chameleon.state.notices import NoticeStore
 from chameleon.state.paths import StatePaths
 from chameleon.state.transaction import TransactionStore
+from chameleon.targets._protocol import Target
 from chameleon.targets._registry import TargetRegistry
 
 
@@ -67,9 +75,18 @@ def _build_parser() -> argparse.ArgumentParser:
     p_status = sub.add_parser("status", help="per-target drift summary")
     _add_common_args(p_status)
 
-    p_diff = sub.add_parser("diff", help="show drift detail for one target")
+    p_diff = sub.add_parser(
+        "diff",
+        help="unified diff between state-repo HEAD and live target files",
+    )
     _add_common_args(p_diff)
-    p_diff.add_argument("target", type=str)
+    p_diff.add_argument(
+        "target",
+        type=str,
+        nargs="?",
+        default=None,
+        help="target id; omit to diff every registered target",
+    )
 
     p_log = sub.add_parser("log", help="state-repo timeline for one target")
     _add_common_args(p_log)
@@ -83,6 +100,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_discard = sub.add_parser("discard", help="overwrite live with state-repo HEAD")
     _add_common_args(p_discard)
     p_discard.add_argument("target", type=str)
+    p_discard.add_argument(
+        "--yes",
+        action="store_true",
+        help="skip the interactive confirmation; required off a TTY",
+    )
 
     p_validate = sub.add_parser("validate", help="schema-validate the neutral file")
     _add_common_args(p_validate)
@@ -201,9 +223,146 @@ def _cmd_status(args: argparse.Namespace) -> int:
     return 0 if "nothing to do" in result.summary else 1
 
 
+def _stdin_is_a_tty() -> bool:
+    """Module-level seam so tests can override TTY detection.
+
+    The merge.resolve helper reads ``sys.stdin.isatty()`` directly; we wrap
+    here so the discard prompt path can be exercised end-to-end without
+    actually attaching a pty.
+    """
+    return stdin_is_a_tty()
+
+
+def _confirm_discard(prompt: str, *, console: Console) -> bool:
+    """Prompt the operator to confirm a destructive discard.
+
+    Wrapping `Confirm.ask` behind a function lets tests inject a deterministic
+    answer without monkey-patching rich internals.
+    """
+    return bool(Confirm.ask(prompt, console=console, default=False))
+
+
+_PartialLayer = Callable[[dict[str, object]], dict[str, object]]
+
+
+def _make_partial_layer(
+    head_obj: dict[str, object],
+    owned_keys: frozenset[str],
+) -> _PartialLayer:
+    """Build the `partial_owned_write` callback that replays HEAD's owned keys.
+
+    Defining this at module scope (rather than as a closure inside the discard
+    loop) keeps ruff B023 happy and makes the layering rule directly testable
+    without driving the CLI.
+    """
+
+    def layer(existing: dict[str, object]) -> dict[str, object]:
+        merged = dict(existing)
+        for k in owned_keys:
+            if k in head_obj:
+                merged[k] = head_obj[k]
+            elif k in merged:
+                del merged[k]
+        return merged
+
+    return layer
+
+
+def _diff_one_target(
+    target_cls: type[Target],
+    paths: StatePaths,
+    target_id: TargetId,
+) -> tuple[bool, str, str]:
+    """Diff one target's state-repo HEAD against its live config files.
+
+    Returns ``(has_drift, stdout_text, status_line)``. ``status_line`` is
+    suitable for stderr; ``stdout_text`` is the concatenated unified diff
+    across all FileSpecs (empty when clean).
+    """
+    repo_path = paths.target_repo(target_id)
+    repo_exists = (repo_path / ".git").exists()
+    repo = GitRepo(repo_path) if repo_exists else None
+
+    chunks: list[str] = []
+    drift = False
+    for spec in target_cls.assembler.files:
+        live_path = Path(os.path.expanduser(spec.live_path))
+        live_bytes = live_path.read_bytes() if live_path.exists() else b""
+        head_bytes = repo.read_at_head(spec.repo_path) if repo is not None else None
+        if head_bytes is None:
+            head_bytes = b""
+        diff_text = unified_diff(
+            head_bytes,
+            live_bytes,
+            label=spec.repo_path,
+            head_label=f"{target_id.value} HEAD",
+            live_label=spec.live_path,
+        )
+        if diff_text:
+            drift = True
+            chunks.append(diff_text)
+
+    status = f"drift detected on {target_id.value}" if drift else f"{target_id.value}: clean"
+    return drift, "".join(chunks), status
+
+
+def _emit_diff(diff_text: str, *, stdout_console: Console) -> None:
+    """Render a unified-diff string to stdout, colorizing on a TTY.
+
+    On a non-TTY (pipe / file redirect / capsys) we write the raw diff so
+    downstream consumers (`patch`, file redirection, golden-file tests) see
+    byte-identical content.
+    """
+    if not diff_text:
+        return
+    if not stdout_console.is_terminal:
+        stdout_console.file.write(diff_text)
+        return
+    for line in diff_text.splitlines(keepends=True):
+        if line.startswith("+++") or line.startswith("---"):
+            stdout_console.print(line.rstrip("\n"), style="bold", highlight=False)
+        elif line.startswith("@@"):
+            stdout_console.print(line.rstrip("\n"), style="cyan", highlight=False)
+        elif line.startswith("+"):
+            stdout_console.print(line.rstrip("\n"), style="green", highlight=False)
+        elif line.startswith("-"):
+            stdout_console.print(line.rstrip("\n"), style="red", highlight=False)
+        else:
+            stdout_console.print(line.rstrip("\n"), highlight=False)
+
+
 def _cmd_diff(args: argparse.Namespace) -> int:
-    sys.stdout.write(f"diff for {args.target}: not implemented in V0\n")
-    return 0
+    """`chameleon diff [<target>]` — git-diff-style exit codes (0/1/>1)."""
+    paths = _resolve_paths(args)
+    targets = TargetRegistry.discover()
+    stderr = Console(stderr=True, highlight=False)
+    stdout = Console(file=sys.stdout, highlight=False, soft_wrap=True)
+
+    if args.target is None:
+        target_ids = sorted(targets.target_ids(), key=lambda t: t.value)
+    else:
+        try:
+            tid = TargetId(value=args.target)
+        except ValueError as e:
+            stderr.print(f"[red]error[/]: {e}")
+            return 2
+        if targets.get(tid) is None:
+            stderr.print(f"[red]error[/]: no registered target {args.target!r}")
+            return 2
+        target_ids = [tid]
+
+    any_drift = False
+    for tid in target_ids:
+        target_cls = targets.get(tid)
+        if target_cls is None:
+            continue
+        drift, diff_text, status = _diff_one_target(target_cls, paths, tid)
+        if drift:
+            any_drift = True
+            stderr.print(f"[yellow]{status}[/]")
+            _emit_diff(diff_text, stdout_console=stdout)
+
+    return 1 if any_drift else 0
 
 
 def _cmd_log(args: argparse.Namespace) -> int:
@@ -226,8 +385,84 @@ def _cmd_adopt(args: argparse.Namespace) -> int:
     return _cmd_merge(args)
 
 
-def _cmd_discard(args: argparse.Namespace) -> int:
-    sys.stdout.write(f"discard {args.target}: not implemented in V0\n")
+def _cmd_discard(args: argparse.Namespace) -> int:  # noqa: PLR0911 — guard chain
+    """Restore live target files to their state-repo HEAD content.
+
+    Refuses to run off a TTY without ``--yes`` (so a CI shell or an
+    auto-login hook can never silently overwrite a hand-edited file).
+    Honors PARTIAL ownership: ``~/.claude.json`` keeps any keys outside
+    the assembler's ``owned_keys`` even though the rest of the file is
+    rewritten.
+    """
+    paths = _resolve_paths(args)
+    targets = TargetRegistry.discover()
+    stderr = Console(stderr=True, highlight=False)
+
+    try:
+        tid = TargetId(value=args.target)
+    except ValueError as e:
+        stderr.print(f"[red]error[/]: {e}")
+        return 2
+    target_cls = targets.get(tid)
+    if target_cls is None:
+        stderr.print(f"[red]error[/]: no registered target {args.target!r}")
+        return 2
+
+    repo_path = paths.target_repo(tid)
+    if not (repo_path / ".git").exists():
+        stderr.print(
+            f"[red]error[/]: no state-repo for {tid.value} at {repo_path}; "
+            "run `chameleon merge` first to capture HEAD"
+        )
+        return 2
+    repo = GitRepo(repo_path)
+    if repo.head_commit() is None:
+        stderr.print(f"[red]error[/]: state-repo for {tid.value} has no HEAD commit")
+        return 2
+
+    if not args.yes:
+        if not _stdin_is_a_tty():
+            stderr.print(
+                "[red]error[/]: refusing to discard without confirmation off a TTY; "
+                "pass [bold]--yes[/] to confirm non-interactively"
+            )
+            return 2
+        prompt = (
+            f"overwrite live {tid.value} files with state-repo HEAD? "
+            "any uncommitted edits will be lost"
+        )
+        if not _confirm_discard(prompt, console=stderr):
+            stderr.print("[dim]aborted[/]")
+            return 0
+
+    # Apply per-FileSpec, honoring ownership semantics.
+    for spec in target_cls.assembler.files:
+        head_bytes = repo.read_at_head(spec.repo_path)
+        if head_bytes is None:
+            # File not tracked at HEAD — skip rather than truncate live.
+            continue
+        live_path = Path(os.path.expanduser(spec.live_path))
+        live_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if spec.ownership is FileOwnership.PARTIAL:
+            # Decode the HEAD blob as JSON, replay only the owned-key subset
+            # back into live; everything else live keeps wins (§10.5).
+            head_obj = json.loads(head_bytes) if head_bytes.strip() else {}
+            if not isinstance(head_obj, dict):
+                head_obj = {}
+            partial_owned_write(
+                live_path,
+                owned_keys=spec.owned_keys,
+                update=_make_partial_layer(head_obj, spec.owned_keys),
+            )
+            continue
+
+        # FULL ownership → atomic temp + rename.
+        tmp = live_path.with_suffix(live_path.suffix + ".chameleon-tmp")
+        tmp.write_bytes(head_bytes)
+        tmp.replace(live_path)
+
+    stderr.print(f"[green]restored[/] {tid.value} from HEAD")
     return 0
 
 
