@@ -114,6 +114,8 @@ class CodexAssembler:
                 ws = tomlkit.table()
                 ws["writable_roots"] = list(authorization.sandbox_workspace_write.writable_roots)
                 doc["sandbox_workspace_write"] = ws
+            if authorization.approvals_reviewer is not None:
+                doc["approvals_reviewer"] = authorization.approvals_reviewer
 
         lifecycle = per_domain.get(Domains.LIFECYCLE)
         if isinstance(lifecycle, CodexLifecycleSection):
@@ -183,7 +185,7 @@ class CodexAssembler:
         directives_keys = {"model_instructions_file", "commit_attribution"}
         capabilities_keys = {"mcp_servers", "plugins", "marketplaces"}
         environment_keys = {"shell_environment_policy"}
-        authorization_keys = {"sandbox_mode", "sandbox_workspace_write"}
+        authorization_keys = {"sandbox_mode", "sandbox_workspace_write", "approvals_reviewer"}
         lifecycle_keys = {"history"}
         interface_keys = {"tui", "file_opener"}
         governance_keys = {"features", "projects"}

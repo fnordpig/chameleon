@@ -87,21 +87,21 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
         "the capabilities domain should now disassemble from this exemplar"
     )
     # What the parity-gap doc explicitly notes as unclaimed and
-    # therefore SHOULD land in pass-through. ``marketplaces`` and ``plugins``
-    # used to be on this list; they were claimed by P1-A and are now in
-    # the capabilities domain (see assertion above).
+    # therefore SHOULD land in pass-through. ``marketplaces``/``plugins``
+    # used to be on this list pre-P1-A; ``approvals_reviewer`` was on it
+    # pre-P1-G; all three are now claimed by their respective codecs (see
+    # the codec assertions above and the dedicated leak check below).
     expected_passthrough = {
         "personality",
         "model_context_window",
         "model_auto_compact_token_limit",
         "model_catalog_json",
-        "approvals_reviewer",
     }
     missing = expected_passthrough - set(passthrough)
     assert not missing, (
         f"expected passthrough keys missing: {missing}; got passthrough={sorted(passthrough)}"
     )
-    # Conversely: ensure ``plugins`` / ``marketplaces`` are NOT in passthrough
-    # any more — the codec owns them now.
-    leaked = {"plugins", "marketplaces"} & set(passthrough)
-    assert not leaked, f"P1-A-claimed keys leaked to pass-through: {leaked}"
+    # Conversely: ensure ``plugins`` / ``marketplaces`` / ``approvals_reviewer``
+    # are NOT in passthrough any more — the codecs own them now.
+    leaked = {"plugins", "marketplaces", "approvals_reviewer"} & set(passthrough)
+    assert not leaked, f"codec-claimed keys leaked to pass-through: {leaked}"
