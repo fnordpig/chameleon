@@ -16,6 +16,7 @@ import tomlkit
 from pydantic import BaseModel
 
 from chameleon._types import FileFormat, FileOwnership, FileSpec, TargetId
+from chameleon.codecs.codex import CodexConfig
 from chameleon.codecs.codex.capabilities import CodexCapabilitiesSection
 from chameleon.codecs.codex.directives import CodexDirectivesSection
 from chameleon.codecs.codex.environment import CodexEnvironmentSection
@@ -45,7 +46,7 @@ class CodexAssembler:
         ),
     )
 
-    full_model: ClassVar[type[BaseModel]] = CodexIdentitySection
+    full_model: ClassVar[type[BaseModel]] = CodexConfig
 
     @staticmethod
     def assemble(

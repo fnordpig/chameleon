@@ -17,6 +17,7 @@ from typing import ClassVar
 from pydantic import BaseModel
 
 from chameleon._types import FileFormat, FileOwnership, FileSpec, TargetId
+from chameleon.codecs.claude import ClaudeSettings
 from chameleon.codecs.claude.capabilities import ClaudeCapabilitiesSection
 from chameleon.codecs.claude.directives import ClaudeDirectivesSection
 from chameleon.codecs.claude.environment import ClaudeEnvironmentSection
@@ -47,10 +48,10 @@ class ClaudeAssembler:
         ),
     )
 
-    # `full_model` is used by the schema-drift test. For Claude V0 we use a
-    # small intermediate model rather than the noisy generated _generated.py
-    # root, since the codecs only address a narrow slice of upstream fields.
-    full_model: ClassVar[type[BaseModel]] = ClaudeIdentitySection
+    # `full_model` is the upstream-canonized root model. The schema-drift
+    # test walks every codec's claimed_paths through it; codecs reference
+    # field names that must exist in this model.
+    full_model: ClassVar[type[BaseModel]] = ClaudeSettings
 
     @staticmethod
     def assemble(
