@@ -1,6 +1,6 @@
 # Chameleon V0 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. **This plan is not phase-ordered.** It's a directed acyclic dependency graph; pick any task whose predecessors are complete. The "Topology" section below shows the graph, the parallel lanes, and the joint points.
 
 **Goal:** Build the V0 Chameleon CLI: a typed, MIT-licensed Python tool that maintains a YAML neutral configuration and bidirectionally synchronizes it with Claude Code (`settings.json`, `.mcp.json`, `~/.claude.json`) and OpenAI Codex CLI (`config.toml`, `requirements.toml`) using per-target git state-repos, a four-source merge engine, A-or-B conflict resolution, and codegen-grounded type safety.
 
@@ -12,131 +12,367 @@
 
 ---
 
+## Topology
+
+The plan is a DAG of 45 tasks. Every task carries a slug (`scaffold-meta`, `claude-codec-identity`, …) and an explicit `Depends on:` list. A worker may begin any task whose predecessors are complete; multiple tasks with cleared predecessors run in parallel. There is no waterfall — the lane structure below shows what runs side-by-side and where lanes converge.
+
+### Dependency graph
+
+```mermaid
+graph TD
+    classDef foundation fill:#dbeafe,stroke:#1e40af,color:#000
+    classDef io fill:#dcfce7,stroke:#166534,color:#000
+    classDef codegen fill:#fef3c7,stroke:#92400e,color:#000
+    classDef schema fill:#fce7f3,stroke:#9f1239,color:#000
+    classDef protocol fill:#e0e7ff,stroke:#3730a3,color:#000
+    classDef codec fill:#fae8ff,stroke:#6b21a8,color:#000
+    classDef state fill:#fee2e2,stroke:#991b1b,color:#000
+    classDef merge fill:#cffafe,stroke:#155e75,color:#000
+    classDef cli fill:#f1f5f9,stroke:#1e293b,color:#000
+    classDef docs fill:#fef9c3,stroke:#854d0e,color:#000
+    classDef release fill:#fed7aa,stroke:#9a3412,color:#000
+    classDef joint fill:#fff,stroke:#000,stroke-width:3px,color:#000
+
+    %% Foundation lane (mostly sequential)
+    F1[scaffold-meta]:::foundation --> F2[scaffold-pyproject]:::foundation
+    F2 --> F3[scaffold-package]:::foundation
+    F3 --> F4[types-primitives]:::foundation
+    F4 --> F5[types-constants]:::foundation
+    F4 --> F6[types-audit]:::foundation
+
+    %% I/O lane: 3 fully parallel
+    F2 --> IY[io-yaml]:::io
+    F2 --> IJ[io-json]:::io
+    F2 --> IT[io-toml]:::io
+
+    %% Codegen lanes: Claude is short, Codex is longer (Rust toolchain)
+    F2 --> CGS[codegen-skeleton]:::codegen
+    CGS --> CGC[codegen-claude]:::codegen
+    CGS --> CGB[codegen-codex-binary]:::codegen
+    CGB --> CGR[codegen-codex-run]:::codegen
+
+    %% Schema lane: 5 domains parallel, then overlay, then neutral
+    F5 --> SI[schema-identity]:::schema
+    F5 --> SD[schema-domains]:::schema
+    F5 --> SDF[schema-deferred]:::schema
+    F4 --> SO[schema-overlay]:::schema
+    SI --> SO
+    SD --> SO
+    SDF --> SO
+    SO --> SN[schema-neutral]:::schema
+
+    %% Codec/target protocols
+    F4 --> CP[codec-protocol]:::protocol
+    F5 --> CP
+    CP --> RTP[registries-and-target-protocol]:::protocol
+    RTP --> SDT[schema-drift-test]:::protocol
+
+    %% Claude codec lane: 5 codecs fully parallel (after their deps)
+    CP --> CCI[claude-codec-identity]:::codec
+    CGC --> CCI
+    SI --> CCI
+    CP --> CCD[claude-codec-directives]:::codec
+    CGC --> CCD
+    SD --> CCD
+    CP --> CCC[claude-codec-capabilities]:::codec
+    CGC --> CCC
+    SD --> CCC
+    CP --> CCE[claude-codec-environment]:::codec
+    CGC --> CCE
+    SD --> CCE
+    CP --> CCS[claude-codec-stubs]:::codec
+    CGC --> CCS
+    SDF --> CCS
+
+    %% Codex codec lane: 5 codecs fully parallel
+    CP --> XCI[codex-codec-identity]:::codec
+    CGR --> XCI
+    SI --> XCI
+    CP --> XCD[codex-codec-directives]:::codec
+    CGR --> XCD
+    SD --> XCD
+    CP --> XCC[codex-codec-capabilities]:::codec
+    CGR --> XCC
+    SD --> XCC
+    CP --> XCE[codex-codec-environment]:::codec
+    CGR --> XCE
+    SD --> XCE
+    CP --> XCS[codex-codec-stubs]:::codec
+    CGR --> XCS
+    SDF --> XCS
+
+    %% Assemblers: JOIN points for each side
+    CCI --> CA{{claude-assembler}}:::joint
+    CCD --> CA
+    CCC --> CA
+    CCE --> CA
+    CCS --> CA
+    RTP --> CA
+    IJ --> CA
+
+    XCI --> XA{{codex-assembler}}:::joint
+    XCD --> XA
+    XCC --> XA
+    XCE --> XA
+    XCS --> XA
+    RTP --> XA
+    IT --> XA
+
+    %% Drift test consumes assemblers' wired-up codec sets
+    CA --> SDT
+    XA --> SDT
+
+    %% State lane (mostly parallel internally)
+    F4 --> SP[state-paths]:::state
+    F3 --> SG[state-git]:::state
+    F4 --> ST[state-transaction]:::state
+    IT --> ST
+    F4 --> SL[state-locks-notices]:::state
+    IT --> SL
+
+    %% Merge lane
+    F4 --> MC[merge-changeset]:::merge
+    F5 --> MC
+    MC --> MR[merge-conflict-and-resolve]:::merge
+    MR --> ME{{merge-engine}}:::joint
+    CA --> ME
+    XA --> ME
+    SP --> ME
+    SG --> ME
+    ST --> ME
+    SL --> ME
+    SN --> ME
+    IY --> ME
+
+    %% CLI lane
+    ME --> CLS[cli-skeleton]:::cli
+    CLS --> CLI[cli-init-polish]:::cli
+
+    %% Docs lane (combined task — touches all three artifact classes)
+    SN --> DOC[docs-login-plugins-schema]:::docs
+
+    %% Release lane
+    CLI --> AT{{acceptance-test}}:::joint
+    DOC --> AT
+    AT --> RT[release-tag]:::release
+```
+
+### Lanes of parallelism
+
+The lanes are working units of independent activity. Within a lane, tasks may further parallelize (5-way for the codec lanes, 3-way for I/O); between lanes, tasks are independent unless an edge crosses lane boundaries.
+
+| Lane | Tasks | Internal parallelism | Cross-lane joins |
+|---|---|---|---|
+| **Foundation** | scaffold-meta → scaffold-pyproject → scaffold-package → types-primitives → (types-constants ‖ types-audit) | mostly sequential; types-audit can run alongside types-constants | feeds every other lane |
+| **I/O** | io-yaml ‖ io-json ‖ io-toml | 3-way fully parallel | io-json → claude-assembler; io-toml → codex-assembler, state-transaction, state-locks-notices; io-yaml → merge-engine |
+| **Codegen-Claude** | codegen-skeleton → codegen-claude | sequential | feeds all 5 Claude codecs |
+| **Codegen-Codex** | codegen-skeleton → codegen-codex-binary → codegen-codex-run | sequential; **slowest path** (Rust toolchain + cargo build) | feeds all 5 Codex codecs |
+| **Schema** | (schema-identity ‖ schema-domains ‖ schema-deferred) → schema-overlay → schema-neutral; schema-passthrough merged into schema-overlay | 3 parallel domains then 2 sequential joins | schema-identity/domains/deferred → matching codecs on each target; schema-neutral → merge-engine + docs |
+| **Protocols** | codec-protocol → registries-and-target-protocol → schema-drift-test | sequential | codec-protocol → all 10 codecs; registries → both assemblers; drift-test consumes assemblers |
+| **Claude codecs** | claude-codec-{identity, directives, capabilities, environment, stubs} | 5-way fully parallel | all five → claude-assembler |
+| **Codex codecs** | codex-codec-{identity, directives, capabilities, environment, stubs} | 5-way fully parallel | all five → codex-assembler |
+| **State** | state-paths ‖ state-git ‖ state-transaction ‖ state-locks-notices | 4-way parallel after their respective deps | all four → merge-engine |
+| **Merge** | merge-changeset → merge-conflict-and-resolve → merge-engine | sequential | merge-engine consumes both assemblers + state + schema-neutral + io-yaml |
+| **CLI** | cli-skeleton → cli-init-polish | sequential | feeds acceptance-test |
+| **Docs** | docs-login-plugins-schema | single task touching three artefact classes | feeds acceptance-test |
+| **Release** | acceptance-test → release-tag | sequential | terminal |
+
+### Joint points
+
+A joint is a task whose predecessors come from multiple lanes. These are the synchronization barriers — work has to land in **every** predecessor lane before the joint can begin.
+
+| Joint | Task | Lanes that must converge first |
+|---|---|---|
+| J1 | `types-constants` | Foundation complete (single-lane join, but everything past here forks) |
+| J2 | `codec-protocol` | types-primitives + types-constants (the foundation finishes paying interest) |
+| J3 | `claude-assembler` | 5-way fan-in: all five Claude codecs + registries-and-target-protocol + io-json |
+| J4 | `codex-assembler` | 5-way fan-in: all five Codex codecs + registries-and-target-protocol + io-toml |
+| J5 | `merge-engine` | **The big join.** Both assemblers + all four state tasks + schema-neutral + io-yaml + merge-conflict-and-resolve. 9 predecessors. |
+| J6 | `acceptance-test` | cli-init-polish + docs-login-plugins-schema. The last sanity gate before tagging. |
+
+### Topological order (earliest-start scheduling)
+
+This is one valid execution order assuming infinite parallelism. Tasks at the same stage have no inter-dependencies; tasks below a stage strictly require some predecessor at or above that stage. Numbering reflects "if you only had one worker, here's a defensible serial order." With multiple workers, anything in the same stage can run side-by-side.
+
+| Stage | Task slug | Predecessors |
+|---|---|---|
+| 1 | `scaffold-meta` | (none) |
+| 2 | `scaffold-pyproject` | scaffold-meta |
+| 3 | `scaffold-package` | scaffold-pyproject |
+| 4 | `types-primitives` | scaffold-package |
+| 5a | `types-constants` | types-primitives |
+| 5b | `types-audit` | types-primitives |
+| 5c | `codegen-skeleton` | scaffold-pyproject |
+| 5d | `io-yaml` | scaffold-pyproject |
+| 5e | `io-json` | scaffold-pyproject |
+| 5f | `io-toml` | scaffold-pyproject |
+| 5g | `state-git` | scaffold-package |
+| 6a | `schema-identity` | types-constants |
+| 6b | `schema-domains` | types-constants |
+| 6c | `schema-deferred` | types-constants |
+| 6d | `codec-protocol` | types-primitives, types-constants |
+| 6e | `codegen-claude` | codegen-skeleton |
+| 6f | `codegen-codex-binary` | codegen-skeleton |
+| 6g | `state-paths` | types-primitives |
+| 6h | `merge-changeset` | types-primitives, types-constants |
+| 7a | `schema-overlay` | schema-identity, schema-domains, schema-deferred, types-primitives |
+| 7b | `registries-and-target-protocol` | codec-protocol |
+| 7c | `codegen-codex-run` | codegen-codex-binary |
+| 7d | `state-transaction` | types-primitives, io-toml |
+| 7e | `state-locks-notices` | types-primitives, io-toml |
+| 7f | `merge-conflict-and-resolve` | merge-changeset |
+| 8a | `schema-neutral` | schema-overlay |
+| 8b | `claude-codec-identity` | codec-protocol, codegen-claude, schema-identity |
+| 8c | `claude-codec-directives` | codec-protocol, codegen-claude, schema-domains |
+| 8d | `claude-codec-capabilities` | codec-protocol, codegen-claude, schema-domains |
+| 8e | `claude-codec-environment` | codec-protocol, codegen-claude, schema-domains |
+| 8f | `claude-codec-stubs` | codec-protocol, codegen-claude, schema-deferred |
+| 8g | `codex-codec-identity` | codec-protocol, codegen-codex-run, schema-identity |
+| 8h | `codex-codec-directives` | codec-protocol, codegen-codex-run, schema-domains |
+| 8i | `codex-codec-capabilities` | codec-protocol, codegen-codex-run, schema-domains |
+| 8j | `codex-codec-environment` | codec-protocol, codegen-codex-run, schema-domains |
+| 8k | `codex-codec-stubs` | codec-protocol, codegen-codex-run, schema-deferred |
+| 9a | `claude-assembler` | claude-codec-{identity,directives,capabilities,environment,stubs}, registries-and-target-protocol, io-json |
+| 9b | `codex-assembler` | codex-codec-{identity,directives,capabilities,environment,stubs}, registries-and-target-protocol, io-toml |
+| 9c | `docs-login-plugins-schema` | schema-neutral |
+| 10 | `schema-drift-test` | registries-and-target-protocol, claude-assembler, codex-assembler |
+| 11 | `merge-engine` | merge-conflict-and-resolve, claude-assembler, codex-assembler, state-paths, state-git, state-transaction, state-locks-notices, schema-neutral, io-yaml |
+| 12 | `cli-skeleton` | merge-engine |
+| 13 | `cli-init-polish` | cli-skeleton |
+| 14 | `acceptance-test` | cli-init-polish, docs-login-plugins-schema |
+| 15 | `release-tag` | acceptance-test |
+
+**Critical path** (longest dep chain to V0): `scaffold-meta → scaffold-pyproject → codegen-skeleton → codegen-codex-binary → codegen-codex-run → codex-codec-identity → codex-assembler → merge-engine → cli-skeleton → cli-init-polish → acceptance-test → release-tag` (12 tasks). The Codex codegen path is the slow lane because it needs cargo + Rust to fetch and build codex-rs as a dependency. If Rust toolchain is unavailable, the critical path detours through codegen-claude and the Codex codegen becomes a parallel late-binding step.
+
+**Maximum simultaneity** is reached at stage 8: up to **11 tasks in flight at once** (the schema-neutral on top of one path, plus 5 Claude codecs and 5 Codex codecs all parallel). A subagent-driven runner with concurrency 11 would burn through stage 8 in a single wave.
+
+---
+
 ## File Structure
 
-Files this plan creates or modifies (annotated by phase):
+Files this plan creates or modifies (annotated by task slug):
 
 ```
 chameleon/
-├── .gitignore                                       Phase A
-├── LICENSE                                          Phase A
-├── README.md                                        Phase A
-├── AGENTS.md                                        Phase A
-├── CLAUDE.md → AGENTS.md (symlink)                  Phase A
-├── pyproject.toml                                   Phase A
-├── uv.lock                                          Phase A (committed)
+├── .gitignore                                       scaffold-package
+├── LICENSE                                          scaffold-package
+├── README.md                                        scaffold-package
+├── AGENTS.md                                        scaffold-package
+├── CLAUDE.md → AGENTS.md (symlink)                  scaffold-package
+├── pyproject.toml                                   scaffold-package
+├── uv.lock                                          scaffold-pyproject (committed)
 ├── src/chameleon/
-│   ├── __init__.py                                  Phase A
-│   ├── cli.py                                       Phase A skeleton, Phase L wiring
-│   ├── _types.py                                    Phase B
+│   ├── __init__.py                                  scaffold-package
+│   ├── cli.py                                       scaffold-package + cli-skeleton
+│   ├── _types.py                                    types-primitives / types-constants
 │   ├── schema/
-│   │   ├── __init__.py                              Phase B
-│   │   ├── _constants.py                            Phase B
-│   │   ├── identity.py                              Phase D
-│   │   ├── directives.py                            Phase D
-│   │   ├── capabilities.py                          Phase D
-│   │   ├── environment.py                           Phase D
-│   │   ├── authorization.py                         Phase D (stub model + xfail)
-│   │   ├── lifecycle.py                             Phase D (stub)
-│   │   ├── interface.py                             Phase D (stub)
-│   │   ├── governance.py                            Phase D (stub)
-│   │   ├── profiles.py                              Phase D
-│   │   ├── passthrough.py                           Phase D
-│   │   └── neutral.py                               Phase D
+│   │   ├── __init__.py                              types-primitives / types-constants
+│   │   ├── _constants.py                            types-primitives / types-constants
+│   │   ├── identity.py                              schema lane
+│   │   ├── directives.py                            schema lane
+│   │   ├── capabilities.py                          schema lane
+│   │   ├── environment.py                           schema lane
+│   │   ├── authorization.py                         schema-deferred (stub model + xfail)
+│   │   ├── lifecycle.py                             schema-deferred (stub)
+│   │   ├── interface.py                             schema-deferred (stub)
+│   │   ├── governance.py                            schema-deferred (stub)
+│   │   ├── profiles.py                              schema lane
+│   │   ├── passthrough.py                           schema lane
+│   │   └── neutral.py                               schema lane
 │   ├── io/
-│   │   ├── __init__.py                              Phase E
-│   │   ├── yaml.py                                  Phase E
-│   │   ├── json.py                                  Phase E
-│   │   └── toml.py                                  Phase E
+│   │   ├── __init__.py                              io lane
+│   │   ├── yaml.py                                  io lane
+│   │   ├── json.py                                  io lane
+│   │   └── toml.py                                  io lane
 │   ├── codecs/
-│   │   ├── __init__.py                              Phase F
-│   │   ├── _protocol.py                             Phase F
-│   │   ├── _registry.py                             Phase F
+│   │   ├── __init__.py                              codec/target protocols
+│   │   ├── _protocol.py                             codec/target protocols
+│   │   ├── _registry.py                             codec/target protocols
 │   │   ├── claude/
-│   │   │   ├── __init__.py                          Phase F
-│   │   │   ├── _generated.py                        Phase C (GENERATED)
-│   │   │   ├── identity.py                          Phase G
-│   │   │   ├── directives.py                        Phase G
-│   │   │   ├── capabilities.py                      Phase G
-│   │   │   ├── environment.py                       Phase G
-│   │   │   ├── authorization.py                     Phase G (stub)
-│   │   │   ├── lifecycle.py                         Phase G (stub)
-│   │   │   ├── interface.py                         Phase G (stub)
-│   │   │   └── governance.py                        Phase G (stub)
+│   │   │   ├── __init__.py                          codec/target protocols
+│   │   │   ├── _generated.py                        codegen-claude / codegen-codex-run (GENERATED)
+│   │   │   ├── identity.py                          claude codecs
+│   │   │   ├── directives.py                        claude codecs
+│   │   │   ├── capabilities.py                      claude codecs
+│   │   │   ├── environment.py                       claude codecs
+│   │   │   ├── authorization.py                     claude-codec-stubs
+│   │   │   ├── lifecycle.py                         claude-codec-stubs
+│   │   │   ├── interface.py                         claude-codec-stubs
+│   │   │   └── governance.py                        claude-codec-stubs
 │   │   └── codex/
-│   │       ├── __init__.py                          Phase F
-│   │       ├── _generated.py                        Phase C (GENERATED)
-│   │       ├── identity.py                          Phase H
-│   │       ├── directives.py                        Phase H
-│   │       ├── capabilities.py                      Phase H
-│   │       ├── environment.py                       Phase H
-│   │       ├── authorization.py                     Phase H (stub)
-│   │       ├── lifecycle.py                         Phase H (stub)
-│   │       ├── interface.py                         Phase H (stub)
-│   │       └── governance.py                        Phase H (stub)
+│   │       ├── __init__.py                          codec/target protocols
+│   │       ├── _generated.py                        codegen-claude / codegen-codex-run (GENERATED)
+│   │       ├── identity.py                          codex codecs
+│   │       ├── directives.py                        codex codecs
+│   │       ├── capabilities.py                      codex codecs
+│   │       ├── environment.py                       codex codecs
+│   │       ├── authorization.py                     codex-codec-stubs
+│   │       ├── lifecycle.py                         codex-codec-stubs
+│   │       ├── interface.py                         codex-codec-stubs
+│   │       └── governance.py                        codex-codec-stubs
 │   ├── targets/
-│   │   ├── __init__.py                              Phase F
-│   │   ├── _protocol.py                             Phase F
-│   │   ├── _registry.py                             Phase F
+│   │   ├── __init__.py                              codec/target protocols
+│   │   ├── _protocol.py                             codec/target protocols
+│   │   ├── _registry.py                             codec/target protocols
 │   │   ├── claude/
-│   │   │   ├── __init__.py                          Phase I
-│   │   │   └── assembler.py                         Phase I
+│   │   │   ├── __init__.py                          assemblers
+│   │   │   └── assembler.py                         assemblers
 │   │   └── codex/
-│   │       ├── __init__.py                          Phase I
-│   │       └── assembler.py                         Phase I
+│   │       ├── __init__.py                          assemblers
+│   │       └── assembler.py                         assemblers
 │   ├── merge/
-│   │   ├── __init__.py                              Phase K
-│   │   ├── changeset.py                             Phase K
-│   │   ├── drift.py                                 Phase K
-│   │   ├── conflict.py                              Phase K
-│   │   ├── resolve.py                               Phase K
-│   │   └── engine.py                                Phase K
+│   │   ├── __init__.py                              merge engine
+│   │   ├── changeset.py                             merge engine
+│   │   ├── drift.py                                 merge engine
+│   │   ├── conflict.py                              merge engine
+│   │   ├── resolve.py                               merge engine
+│   │   └── engine.py                                merge engine
 │   └── state/
-│       ├── __init__.py                              Phase J
-│       ├── paths.py                                 Phase J
-│       ├── git.py                                   Phase J
-│       ├── transaction.py                           Phase J
-│       ├── locks.py                                 Phase J
-│       └── notices.py                               Phase J
+│       ├── __init__.py                              state lane
+│       ├── paths.py                                 state lane
+│       ├── git.py                                   state lane
+│       ├── transaction.py                           state lane
+│       ├── locks.py                                 state lane
+│       └── notices.py                               state lane
 ├── tools/
 │   └── sync-schemas/
-│       ├── pins.toml                                Phase C
-│       ├── sync.py                                  Phase C
+│       ├── pins.toml                                codegen lanes
+│       ├── sync.py                                  codegen lanes
 │       ├── upstream/
-│       │   └── claude.schema.json                   Phase C (vendored)
+│       │   └── claude.schema.json                   codegen lanes (vendored)
 │       └── codex/
-│           ├── Cargo.toml                           Phase C
-│           ├── Cargo.lock                           Phase C (committed)
-│           └── src/main.rs                          Phase C
+│           ├── Cargo.toml                           codegen lanes
+│           ├── Cargo.lock                           codegen lanes (committed)
+│           └── src/main.rs                          codegen lanes
 ├── tests/
-│   ├── conftest.py                                  Phase A
-│   ├── test_smoke.py                                Phase A
-│   ├── typing_audit.py                              Phase B
-│   ├── unit/                                        Phases B+
-│   ├── property/                                    Phases G/H
-│   ├── golden/                                      Phases G/H/I
-│   ├── conflicts/                                   Phase K
-│   ├── recovery/                                    Phase J
-│   ├── concurrency/                                 Phase J
-│   ├── integration/                                 Phase L
-│   └── schema_drift/                                Phase F
+│   ├── conftest.py                                  scaffold-package
+│   ├── test_smoke.py                                scaffold-package
+│   ├── typing_audit.py                              types-primitives / types-constants
+│   ├── unit/                                        from types-primitives onward
+│   ├── property/                                    Claude+Codex codec lanes
+│   ├── golden/                                      Claude+Codex codec lanes/I
+│   ├── conflicts/                                   merge engine
+│   ├── recovery/                                    state lane
+│   ├── concurrency/                                 state lane
+│   ├── integration/                                 cli lane
+│   └── schema_drift/                                codec/target protocols
 ├── docs/
 │   ├── superpowers/specs/2026-05-05-chameleon-design.md  (already committed)
 │   ├── superpowers/plans/2026-05-05-chameleon-v0.md      (this plan)
-│   ├── login/launchd.md                             Phase M
-│   ├── login/systemd.md                             Phase M
-│   ├── login/zlogin.md                              Phase M
-│   ├── plugins/authoring.md                         Phase M
-│   └── schema/neutral.schema.json                   Phase M (generated)
+│   ├── login/launchd.md                             docs + release
+│   ├── login/systemd.md                             docs + release
+│   ├── login/zlogin.md                              docs + release
+│   ├── plugins/authoring.md                         docs + release
+│   └── schema/neutral.schema.json                   docs + release (generated)
 └── skills/
-    └── README.md                                    Phase A
+    └── README.md                                    scaffold-package
 ```
 
 ---
 
-## Phase A — Project Scaffolding
+### Task: `scaffold-meta` — top-level meta files (LICENSE, .gitignore, README, AGENTS.md, CLAUDE.md, skills/README.md)
 
-### Task A1: Top-level meta files (LICENSE, .gitignore, README, AGENTS.md, CLAUDE.md, skills/README.md)
+**Depends on:** (none — initial scaffolding)
 
 **Files:**
 - Create: `LICENSE`
@@ -371,7 +607,9 @@ git commit -m "chore: add license, gitignore, README, agent conventions, skills/
 
 ---
 
-### Task A2: pyproject.toml + dependency groups
+### Task: `scaffold-pyproject` — pyproject.toml + dependency groups
+
+**Depends on:** scaffold-meta
 
 **Files:**
 - Create: `pyproject.toml`
@@ -481,7 +719,9 @@ git commit -m "chore: add pyproject.toml with deps, scripts, ruff/ty/pytest conf
 
 ---
 
-### Task A3: Package skeleton + smoke test
+### Task: `scaffold-package` — package skeleton + smoke test
+
+**Depends on:** scaffold-pyproject
 
 **Files:**
 - Create: `src/chameleon/__init__.py`
@@ -504,16 +744,13 @@ import sys
 import chameleon
 from chameleon import cli
 
-
 def test_package_has_version() -> None:
     assert isinstance(chameleon.__version__, str)
     assert chameleon.__version__  # non-empty
 
-
 def test_cli_main_returns_zero_on_help() -> None:
     rc = cli.main(["--help"])
     assert rc == 0
-
 
 def test_cli_invokable_via_subprocess() -> None:
     # Verifies the [project.scripts] entry point landed in the venv.
@@ -562,8 +799,8 @@ __all__ = ["__version__"]
 ```python
 """Chameleon CLI entry point.
 
-Phase A skeleton: parses --help/--version and exits 0. Subcommands land
-in Phase L.
+scaffold-package skeleton: parses --help/--version and exits 0. Subcommands land
+in cli-skeleton.
 """
 from __future__ import annotations
 
@@ -572,7 +809,6 @@ import sys
 from collections.abc import Sequence
 
 from chameleon import __version__
-
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -585,17 +821,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"chameleon {__version__}")
     return parser
 
-
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI entry point. Returns the process exit code.
 
-    Phase A: prints help and exits 0. Subcommands are added in Phase L.
+    scaffold-package: prints help and exits 0. Subcommands are added in cli-skeleton.
     """
     parser = _build_parser()
     parser.parse_args(list(argv) if argv is not None else None)
     parser.print_help()
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
@@ -629,9 +863,9 @@ git commit -m "feat: add chameleon package skeleton with --help-only CLI and smo
 
 ---
 
-## Phase B — Foundational Types
+### Task: `types-primitives` — _types.py — TargetId, FieldPath, FileSpec, JsonValue
 
-### Task B1: `_types.py` — typed primitives shared across the codebase
+**Depends on:** scaffold-package
 
 **Files:**
 - Create: `src/chameleon/_types.py`
@@ -661,10 +895,9 @@ from chameleon._types import (
     register_target_id,
 )
 
-
 class TestTargetId:
     def test_unregistered_target_id_rejected(self) -> None:
-        # No targets are registered until Phase F wires them up; until then,
+        # No targets are registered until the registries-and-target-protocol task wires them up; until then,
         # construction should fail unless the operator pre-registers a name.
         with pytest.raises(ValidationError):
             TargetId(value="never-registered")
@@ -684,7 +917,6 @@ class TestTargetId:
         register_target_id("eq")
         assert TargetId(value="eq") == TargetId(value="eq")
 
-
 class TestFieldPath:
     def test_field_path_is_a_tuple(self) -> None:
         p = FieldPath(segments=("permissions", "allow"))
@@ -698,7 +930,6 @@ class TestFieldPath:
 
     def test_field_path_render_dotted(self) -> None:
         assert FieldPath(segments=("permissions", "allow")).render() == "permissions.allow"
-
 
 class TestFileSpec:
     def test_file_spec_round_trips(self) -> None:
@@ -721,7 +952,6 @@ class TestFileSpec:
                 format=FileFormat.JSON,
                 # owned_keys missing
             )
-
 
 class TestJsonValue:
     def test_json_value_accepts_scalars_and_nested(self) -> None:
@@ -788,21 +1018,19 @@ JsonValue = (
     | dict[str, "JsonValue"]
 )
 
-
 # ------------------------------------------------------------------
 # TargetId — registry-validated identifier for a Chameleon target
 # ------------------------------------------------------------------
 
 # Mutable registry populated at startup by entry-point discovery
-# (Phase F) plus tests via `register_target_id`. Kept module-private;
+# (registries-and-target-protocol task) plus tests via `register_target_id`. Kept module-private;
 # external code adds via the helper, never by mutating directly.
 _TARGET_REGISTRY: set[str] = set()
-
 
 def register_target_id(name: str) -> None:
     """Register a target name as valid for `TargetId` construction.
 
-    Called at startup by the targets registry (Phase F) and by tests.
+    Called at startup by the targets registry (registries-and-target-protocol task) and by tests.
     Idempotent.
     """
     if not name or not name.replace("-", "").replace("_", "").isalnum():
@@ -810,18 +1038,16 @@ def register_target_id(name: str) -> None:
         raise ValueError(msg)
     _TARGET_REGISTRY.add(name)
 
-
 def registered_target_names() -> frozenset[str]:
     """Return the current set of registered target names (for diagnostics)."""
     return frozenset(_TARGET_REGISTRY)
-
 
 class TargetId(BaseModel):
     """Registry-validated target identifier.
 
     Construction fails if `value` is not in `_TARGET_REGISTRY`. Tests
     register names via `register_target_id`; production code registers
-    via the targets-registry entry-point discovery path (Phase F).
+    via the targets-registry entry-point discovery path (registries-and-target-protocol task).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -847,18 +1073,16 @@ class TargetId(BaseModel):
     def __str__(self) -> str:
         return self.value
 
-
 # ------------------------------------------------------------------
 # FieldPath — typed path through a Pydantic model's field hierarchy
 # ------------------------------------------------------------------
-
 
 class FieldPath(NamedTuple):
     """A path through a Pydantic model's nested fields.
 
     Each segment is the literal field name in the parent model. Codec
     `claimed_paths` is a frozenset of these. Validated against the
-    target's `FullTargetModel` at registry-load time (Phase F).
+    target's `FullTargetModel` at registry-load time (registries-and-target-protocol task).
     """
 
     segments: tuple[str, ...]
@@ -873,11 +1097,9 @@ class FieldPath(NamedTuple):
             return False
         return other.segments[: len(self.segments)] == self.segments
 
-
 # ------------------------------------------------------------------
 # FileFormat, FileOwnership — closed enums
 # ------------------------------------------------------------------
-
 
 class FileFormat(Enum):
     """Wire format for a target file."""
@@ -885,7 +1107,6 @@ class FileFormat(Enum):
     JSON = "json"
     TOML = "toml"
     YAML = "yaml"
-
 
 class FileOwnership(Enum):
     """Ownership semantics for a file Chameleon writes.
@@ -898,11 +1119,9 @@ class FileOwnership(Enum):
     FULL = "full"
     PARTIAL = "partial"
 
-
 # ------------------------------------------------------------------
 # FileSpec — typed declaration of a target-owned file
 # ------------------------------------------------------------------
-
 
 class FileSpec(BaseModel):
     """Declaration of one file an assembler reads/writes.
@@ -930,7 +1149,6 @@ class FileSpec(BaseModel):
             )
             raise ValueError(msg)
         return self
-
 
 __all__: list[str] = [
     "FieldPath",
@@ -972,7 +1190,9 @@ git commit -m "feat(types): add TargetId, FieldPath, FileSpec, JsonValue typed p
 
 ---
 
-### Task B2: Closed enums — `Domains`, `OnConflict`, and built-in `TargetId` constants
+### Task: `types-constants` — Domains + OnConflict enums + built-in TargetIds
+
+**Depends on:** types-primitives
 
 **Files:**
 - Create: `src/chameleon/schema/__init__.py`
@@ -996,7 +1216,6 @@ from chameleon.schema._constants import (
     OnConflict,
 )
 
-
 def test_domains_has_eight_members() -> None:
     expected = {
         "IDENTITY",
@@ -1010,12 +1229,10 @@ def test_domains_has_eight_members() -> None:
     }
     assert {d.name for d in Domains} == expected
 
-
 def test_domains_values_are_lowercase_yaml_keys() -> None:
     # The enum value is what shows up as a YAML key in the neutral form.
     for d in Domains:
         assert d.value == d.name.lower()
-
 
 def test_on_conflict_strategies() -> None:
     assert {s.name for s in OnConflict} == {
@@ -1026,14 +1243,12 @@ def test_on_conflict_strategies() -> None:
         "PREFER_LKG",
     }
 
-
 def test_builtin_target_ids_are_registered() -> None:
     # Importing the constants module must register `claude` and `codex`.
     assert isinstance(BUILTIN_CLAUDE, TargetId)
     assert isinstance(BUILTIN_CODEX, TargetId)
     assert BUILTIN_CLAUDE.value == "claude"
     assert BUILTIN_CODEX.value == "codex"
-
 
 def test_builtin_target_ids_can_be_reconstructed() -> None:
     # After import, third-party code can construct equivalent TargetId values.
@@ -1056,7 +1271,7 @@ Expected: ImportError.
 ```python
 """Chameleon neutral schema — eight typed Pydantic domain models plus
 profiles overlay, pass-through namespace, and the composing `Neutral`
-model. Domain modules land in Phase D; this `__init__` re-exports them
+model. Domain modules land in the schema-domain tasks; this `__init__` re-exports them
 once they exist.
 """
 from __future__ import annotations
@@ -1078,7 +1293,6 @@ from enum import Enum
 
 from chameleon._types import TargetId, register_target_id
 
-
 class Domains(Enum):
     """The eight orthogonal slices of the schema ontology (§7).
 
@@ -1095,7 +1309,6 @@ class Domains(Enum):
     INTERFACE = "interface"
     GOVERNANCE = "governance"
 
-
 class OnConflict(Enum):
     """Non-interactive conflict resolution strategies (§5.2)."""
 
@@ -1105,16 +1318,14 @@ class OnConflict(Enum):
     PREFER_NEUTRAL = "prefer-neutral"
     PREFER_LKG = "prefer-lkg"
 
-
 # Register built-in target names so TargetId construction succeeds for them
 # starting from import time. Plugin targets register themselves later via
-# entry-point discovery (Phase F); both flows funnel through register_target_id.
+# entry-point discovery (registries-and-target-protocol task); both flows funnel through register_target_id.
 register_target_id("claude")
 register_target_id("codex")
 
 BUILTIN_CLAUDE: TargetId = TargetId(value="claude")
 BUILTIN_CODEX: TargetId = TargetId(value="codex")
-
 
 __all__ = [
     "BUILTIN_CLAUDE",
@@ -1150,7 +1361,9 @@ git commit -m "feat(schema): add Domains and OnConflict enums plus built-in Targ
 
 ---
 
-### Task B3: `tests/typing_audit.py` — enforce the "no strings" rule
+### Task: `types-audit` — typing-audit forbidden-pattern test
+
+**Depends on:** types-primitives
 
 **Files:**
 - Create: `tests/typing_audit.py`
@@ -1191,7 +1404,6 @@ EXEMPT_PATHS: frozenset[Path] = frozenset(
     }
 )
 
-
 def _python_sources() -> Iterator[Path]:
     for path in SRC_DIR.rglob("*.py"):
         if path.name == "_generated.py":
@@ -1199,7 +1411,6 @@ def _python_sources() -> Iterator[Path]:
         if path in EXEMPT_PATHS:
             continue
         yield path
-
 
 @pytest.mark.parametrize(
     ("pattern", "rationale"),
@@ -1234,7 +1445,6 @@ def test_forbidden_pattern_absent(pattern: re.Pattern[str], rationale: str) -> N
     if offenders:
         rendered = "\n".join(f"  {p}:{n}: {ln}" for p, n, ln in offenders)
         pytest.fail(f"{rationale}:\n{rendered}")
-
 
 def test_no_codec_uses_string_target_attribute() -> None:
     """Codec target= class-var must be a TargetId, not a literal string.
@@ -1284,11 +1494,11 @@ git commit -m "test(typing): add forbidden-pattern audit enforcing no-strings ru
 
 ---
 
-## Phase C — Schema Codegen Pipeline
-
 This phase establishes the upstream-canonization pipeline (§8.4): vendor a JSON Schema for each target, run `datamodel-code-generator` to produce a typed Pydantic model, commit the generated file. The generated `_generated.py` is the foundation every codec depends on — get this wrong and every downstream task fails type-checking.
 
-### Task C1: `tools/sync-schemas/` skeleton + `pins.toml`
+### Task: `codegen-skeleton` — tools/sync-schemas/ + pins.toml + sync.py orchestrator
+
+**Depends on:** scaffold-pyproject
 
 **Files:**
 - Create: `tools/sync-schemas/__init__.py`
@@ -1364,11 +1574,9 @@ PINS_PATH = REPO_ROOT / "tools" / "sync-schemas" / "pins.toml"
 UPSTREAM_DIR = REPO_ROOT / "tools" / "sync-schemas" / "upstream"
 CODECS_DIR = REPO_ROOT / "src" / "chameleon" / "codecs"
 
-
 def _load_pins() -> dict[str, object]:
     with PINS_PATH.open("rb") as fh:
         return tomllib.load(fh)
-
 
 def sync_claude(pins: dict[str, object]) -> int:
     section = pins["claude"]
@@ -1424,7 +1632,6 @@ def sync_claude(pins: dict[str, object]) -> int:
 
     sys.stderr.write(f"[claude] OK; commit upstream/{vendored_at.name} and {output.name}\n")
     return 0
-
 
 def sync_codex(pins: dict[str, object]) -> int:
     section = pins["codex"]
@@ -1492,7 +1699,6 @@ def sync_codex(pins: dict[str, object]) -> int:
     sys.stderr.write(f"[codex] OK; commit upstream/{vendored_at.name} and {output.name}\n")
     return 0
 
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Sync upstream schemas + regenerate _generated.py")
     parser.add_argument("target", choices=["claude", "codex", "all"])
@@ -1508,7 +1714,6 @@ def main(argv: list[str] | None = None) -> int:
         if rc != 0:
             return rc
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())
@@ -1574,7 +1779,9 @@ git commit -m "feat(sync-schemas): scaffold pins.toml + sync.py orchestrator"
 
 ---
 
-### Task C2: Vendor Claude schema and generate `claude/_generated.py`
+### Task: `codegen-claude` — vendor schemastore Claude schema and generate _generated.py
+
+**Depends on:** codegen-skeleton
 
 **Files:**
 - Modify: `tools/sync-schemas/pins.toml` (replace placeholder SHA)
@@ -1677,7 +1884,9 @@ git commit -m "feat(codecs/claude): vendor schemastore JSON schema and generate 
 
 ---
 
-### Task C3: Codex Rust binary that dumps `ConfigToml` schema as JSON
+### Task: `codegen-codex-binary` — Rust binary that dumps schemars JSON Schema for ConfigToml
+
+**Depends on:** codegen-skeleton
 
 **Files:**
 - Create: `tools/sync-schemas/codex/Cargo.toml`
@@ -1781,7 +1990,9 @@ git commit -m "feat(sync-schemas): add codex Rust binary dumping schemars JSON S
 
 ---
 
-### Task C4: Generate `codex/_generated.py` and commit
+### Task: `codegen-codex-run` — run codex codegen and commit _generated.py
+
+**Depends on:** codegen-codex-binary
 
 **Files:**
 - Modify: `tools/sync-schemas/pins.toml` (replace placeholder Codex SHA)
@@ -1854,9 +2065,9 @@ git commit -m "feat(codecs/codex): generate _generated.py from codex-rs ConfigTo
 
 ---
 
-## Phase D — Neutral Schema (Eight Domains + Profiles + Pass-through)
+### Task: `schema-identity` — Identity domain with per-target model mapping
 
-### Task D1: `schema/identity.py` — model + provider + auth (with per-target Mapping pattern)
+**Depends on:** types-constants
 
 **Files:**
 - Create: `src/chameleon/schema/identity.py`
@@ -1881,15 +2092,12 @@ from chameleon.schema.identity import (
     ReasoningEffort,
 )
 
-
 def test_identity_minimal() -> None:
     ident = Identity()
     assert ident.reasoning_effort is None  # all optional
 
-
 def test_reasoning_effort_enum() -> None:
     assert {e.value for e in ReasoningEffort} == {"minimal", "low", "medium", "high", "xhigh"}
-
 
 def test_identity_model_per_target_mapping() -> None:
     # identity.model is target-specific (§7.1) — must be a mapping.
@@ -1898,21 +2106,17 @@ def test_identity_model_per_target_mapping() -> None:
     assert ident.model[BUILTIN_CLAUDE] == "claude-sonnet-4-7"
     assert ident.model[BUILTIN_CODEX] == "gpt-5.4"
 
-
 def test_identity_model_rejects_scalar() -> None:
     with pytest.raises(ValidationError):
         Identity(model="claude-sonnet-4-7")  # type: ignore[arg-type]
-
 
 def test_identity_reasoning_effort_target_shared_scalar() -> None:
     # reasoning_effort is target-shared (both targets understand "high"); scalar is fine.
     ident = Identity(reasoning_effort=ReasoningEffort.HIGH)
     assert ident.reasoning_effort is ReasoningEffort.HIGH
 
-
 def test_auth_method_enum() -> None:
     assert {a.value for a in AuthMethod} == {"oauth", "api-key", "bedrock", "vertex", "azure"}
-
 
 def test_identity_round_trips_via_pydantic() -> None:
     ident = Identity(
@@ -1955,7 +2159,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import TargetId
 
-
 class ReasoningEffort(Enum):
     """Reasoning effort vocabulary shared by Claude and Codex.
 
@@ -1970,7 +2173,6 @@ class ReasoningEffort(Enum):
     HIGH = "high"
     XHIGH = "xhigh"
 
-
 class AuthMethod(Enum):
     """How Chameleon expects the operator to authenticate to the target."""
 
@@ -1979,7 +2181,6 @@ class AuthMethod(Enum):
     BEDROCK = "bedrock"
     VERTEX = "vertex"
     AZURE = "azure"
-
 
 class IdentityEndpoint(BaseModel):
     """Per-target endpoint base URL (target-specific by nature).
@@ -1993,7 +2194,6 @@ class IdentityEndpoint(BaseModel):
 
     base_url: dict[TargetId, str] | None = None
 
-
 class IdentityAuth(BaseModel):
     """Authentication configuration."""
 
@@ -2005,11 +2205,9 @@ class IdentityAuth(BaseModel):
         description="Path to an executable that prints an API key on stdout.",
     )
 
-
 # Per-target model name. The value type is plain str at the neutral
 # layer — codecs validate against each target's _generated literals.
 IdentityModel = dict[TargetId, str]
-
 
 class Identity(BaseModel):
     """The identity domain — composed of target-shared and per-target keys.
@@ -2035,7 +2233,6 @@ class Identity(BaseModel):
     )
     endpoint: IdentityEndpoint = Field(default_factory=IdentityEndpoint)
     auth: IdentityAuth = Field(default_factory=IdentityAuth)
-
 
 __all__ = [
     "AuthMethod",
@@ -2073,7 +2270,9 @@ git commit -m "feat(schema/identity): add Identity domain with per-target model 
 
 ---
 
-### Task D2: `directives.py`, `capabilities.py`, `environment.py`
+### Task: `schema-domains` — directives, capabilities, environment domain models
+
+**Depends on:** types-constants
 
 **Files:**
 - Create: `src/chameleon/schema/directives.py`
@@ -2092,12 +2291,10 @@ from __future__ import annotations
 
 from chameleon.schema.directives import Directives
 
-
 def test_directives_minimal() -> None:
     d = Directives()
     assert d.system_prompt_file is None
     assert d.commit_attribution is None
-
 
 def test_directives_with_values() -> None:
     d = Directives(
@@ -2119,18 +2316,15 @@ from chameleon.schema.capabilities import (
     McpServerStreamableHttp,
 )
 
-
 def test_mcp_server_stdio() -> None:
     s = McpServerStdio(command="npx", args=["-y", "@x/y"])
     assert s.command == "npx"
     assert s.args == ["-y", "@x/y"]
 
-
 def test_mcp_server_http() -> None:
     s = McpServerStreamableHttp(url="https://x/mcp", bearer_token_env_var="X_TOKEN")
     assert str(s.url).startswith("https://")
     assert s.bearer_token_env_var == "X_TOKEN"
-
 
 def test_capabilities_with_mcp_servers() -> None:
     c = Capabilities(mcp_servers={"memory": McpServerStdio(command="npx", args=["-y", "memory"])})
@@ -2144,16 +2338,13 @@ from __future__ import annotations
 
 from chameleon.schema.environment import Environment, InheritPolicy
 
-
 def test_environment_minimal() -> None:
     e = Environment()
     assert e.variables == {}
 
-
 def test_environment_with_variables() -> None:
     e = Environment(variables={"CI": "true", "DEBUG": "0"})
     assert e.variables["CI"] == "true"
-
 
 def test_inherit_policy() -> None:
     assert {p.value for p in InheritPolicy} == {"all", "core", "none"}
@@ -2183,12 +2374,10 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 class Verbosity(Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
-
 
 class Directives(BaseModel):
     """Behaviour-shaping configuration."""
@@ -2206,7 +2395,6 @@ class Directives(BaseModel):
     verbosity: Verbosity | None = None
     show_thinking_summary: bool | None = None
 
-
 __all__ = ["Directives", "Verbosity"]
 ```
 
@@ -2220,7 +2408,6 @@ from typing import Annotated, Literal
 
 from pydantic import AnyHttpUrl, BaseModel, ConfigDict, Discriminator, Field, Tag
 
-
 class McpServerStdio(BaseModel):
     model_config = ConfigDict(extra="forbid")
     transport: Literal["stdio"] = "stdio"
@@ -2229,14 +2416,12 @@ class McpServerStdio(BaseModel):
     env: dict[str, str] = Field(default_factory=dict)
     cwd: str | None = None
 
-
 class McpServerStreamableHttp(BaseModel):
     model_config = ConfigDict(extra="forbid")
     transport: Literal["http"] = "http"
     url: AnyHttpUrl
     bearer_token_env_var: str | None = None
     http_headers: dict[str, str] = Field(default_factory=dict)
-
 
 def _mcp_server_discriminator(v: object) -> str:
     if isinstance(v, dict):
@@ -2245,12 +2430,10 @@ def _mcp_server_discriminator(v: object) -> str:
         return "stdio"
     return getattr(v, "transport", "stdio")
 
-
 McpServer = Annotated[
     Annotated[McpServerStdio, Tag("stdio")] | Annotated[McpServerStreamableHttp, Tag("http")],
     Discriminator(_mcp_server_discriminator),
 ]
-
 
 class Capabilities(BaseModel):
     """What tools/MCP/skills/subagents the agent can use.
@@ -2268,7 +2451,6 @@ class Capabilities(BaseModel):
         description="Mapping of subagent name to a config file path.",
     )
     web_search: Literal["cached", "live", "disabled"] | None = None
-
 
 __all__ = [
     "Capabilities",
@@ -2288,12 +2470,10 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 class InheritPolicy(Enum):
     ALL = "all"
     CORE = "core"
     NONE = "none"
-
 
 class Environment(BaseModel):
     """Variables and execution context.
@@ -2309,7 +2489,6 @@ class Environment(BaseModel):
     exclude: list[str] = Field(default_factory=list)
     additional_directories: list[str] = Field(default_factory=list)
     respect_gitignore: bool | None = None
-
 
 __all__ = ["Environment", "InheritPolicy"]
 ```
@@ -2334,7 +2513,9 @@ git commit -m "feat(schema): add directives, capabilities, environment domains"
 
 ---
 
-### Task D3: Stub schemas for the four deferred domains
+### Task: `schema-deferred` — typed stubs for authorization, lifecycle, interface, governance
+
+**Depends on:** types-constants
 
 **Files:**
 - Create: `src/chameleon/schema/authorization.py`
@@ -2355,7 +2536,6 @@ from chameleon.schema.governance import Governance
 from chameleon.schema.interface import Interface
 from chameleon.schema.lifecycle import Lifecycle
 
-
 def test_deferred_domains_constructable_empty() -> None:
     # All four deferred domains accept the no-arg form so a neutral.yaml
     # can omit them entirely.
@@ -2363,7 +2543,6 @@ def test_deferred_domains_constructable_empty() -> None:
     Lifecycle()
     Interface()
     Governance()
-
 
 def test_authorization_default_mode_typed() -> None:
     from chameleon.schema.authorization import DefaultMode
@@ -2394,12 +2573,10 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 class DefaultMode(Enum):
     READ_ONLY = "read-only"
     WORKSPACE_WRITE = "workspace-write"
     FULL_ACCESS = "full-access"
-
 
 class FilesystemPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -2408,14 +2585,12 @@ class FilesystemPolicy(BaseModel):
     deny_read: list[str] = Field(default_factory=list)
     deny_write: list[str] = Field(default_factory=list)
 
-
 class NetworkPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     allowed_domains: list[str] = Field(default_factory=list)
     denied_domains: list[str] = Field(default_factory=list)
     allow_local_binding: bool | None = None
     allow_unix_sockets: list[str] = Field(default_factory=list)
-
 
 class Authorization(BaseModel):
     """V0: typed schema only; codecs deferred to follow-on spec (§15.1)."""
@@ -2428,7 +2603,6 @@ class Authorization(BaseModel):
     allow_patterns: list[str] = Field(default_factory=list)
     ask_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
-
 
 __all__ = ["Authorization", "DefaultMode", "FilesystemPolicy", "NetworkPolicy"]
 ```
@@ -2446,29 +2620,24 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 class HistoryPersistence(Enum):
     SAVE_ALL = "save-all"
     NONE = "none"
-
 
 class History(BaseModel):
     model_config = ConfigDict(extra="forbid")
     persistence: HistoryPersistence | None = None
     max_bytes: int | None = Field(default=None, ge=0)
 
-
 class TelemetryExporter(Enum):
     NONE = "none"
     OTLP_HTTP = "otlp-http"
     OTLP_GRPC = "otlp-grpc"
 
-
 class Telemetry(BaseModel):
     model_config = ConfigDict(extra="forbid")
     exporter: TelemetryExporter | None = None
     endpoint: str | None = None
-
 
 class Lifecycle(BaseModel):
     """V0: typed schema only; codecs deferred."""
@@ -2479,7 +2648,6 @@ class Lifecycle(BaseModel):
     history: History = Field(default_factory=History)
     telemetry: Telemetry = Field(default_factory=Telemetry)
     cleanup_period_days: int | None = Field(default=None, ge=0)
-
 
 __all__ = ["History", "HistoryPersistence", "Lifecycle", "Telemetry", "TelemetryExporter"]
 ```
@@ -2495,7 +2663,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
 
-
 class Interface(BaseModel):
     model_config = ConfigDict(extra="forbid")
     fullscreen: bool | None = None
@@ -2506,7 +2673,6 @@ class Interface(BaseModel):
     voice_enabled: bool | None = None
     motion_reduced: bool | None = None
     notification_channel: str | None = None
-
 
 __all__ = ["Interface"]
 ```
@@ -2524,23 +2690,19 @@ from enum import Enum
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 class UpdatesChannel(Enum):
     STABLE = "stable"
     LATEST = "latest"
-
 
 class Trust(BaseModel):
     model_config = ConfigDict(extra="forbid")
     trusted_paths: list[str] = Field(default_factory=list)
     untrusted_paths: list[str] = Field(default_factory=list)
 
-
 class Updates(BaseModel):
     model_config = ConfigDict(extra="forbid")
     channel: UpdatesChannel | None = None
     minimum_version: str | None = None
-
 
 class Governance(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -2548,7 +2710,6 @@ class Governance(BaseModel):
     trust: Trust = Field(default_factory=Trust)
     updates: Updates = Field(default_factory=Updates)
     features: dict[str, bool] = Field(default_factory=dict)
-
 
 __all__ = ["Governance", "Trust", "Updates", "UpdatesChannel"]
 ```
@@ -2566,7 +2727,9 @@ git commit -m "feat(schema): add typed stubs for deferred domains (authorization
 
 ---
 
-### Task D4: `profiles.py`, `passthrough.py`
+### Task: `schema-overlay` — profiles overlay + pass-through bag
+
+**Depends on:** schema-identity, schema-domains, schema-deferred, types-primitives
 
 **Files:**
 - Create: `src/chameleon/schema/profiles.py`
@@ -2585,7 +2748,6 @@ from chameleon.schema._constants import BUILTIN_CLAUDE
 from chameleon.schema.identity import Identity, ReasoningEffort
 from chameleon.schema.profiles import Profile
 
-
 def test_profile_overlay() -> None:
     p = Profile(
         identity=Identity(
@@ -2595,7 +2757,6 @@ def test_profile_overlay() -> None:
     )
     assert p.identity is not None
     assert p.identity.reasoning_effort is ReasoningEffort.HIGH
-
 
 def test_profile_all_optional() -> None:
     # A profile may overlay any subset of any domain — including none.
@@ -2612,16 +2773,13 @@ from __future__ import annotations
 from chameleon._types import JsonValue
 from chameleon.schema.passthrough import PassThroughBag
 
-
 def test_passthrough_bag_stores_values() -> None:
     bag: PassThroughBag = PassThroughBag(items={"voice": {"enabled": True, "mode": "tap"}})
     assert bag.items["voice"] == {"enabled": True, "mode": "tap"}
 
-
 def test_passthrough_bag_empty() -> None:
     bag = PassThroughBag()
     assert bag.items == {}
-
 
 def test_passthrough_round_trips() -> None:
     bag = PassThroughBag(items={"a": [1, "two", None], "b": {"nested": True}})
@@ -2662,7 +2820,6 @@ from chameleon.schema.identity import Identity
 from chameleon.schema.interface import Interface
 from chameleon.schema.lifecycle import Lifecycle
 
-
 class Profile(BaseModel):
     """A named overlay; every domain is optional (overlay-only)."""
 
@@ -2676,7 +2833,6 @@ class Profile(BaseModel):
     lifecycle: Lifecycle | None = None
     interface: Interface | None = None
     governance: Governance | None = None
-
 
 __all__ = ["Profile"]
 ```
@@ -2705,14 +2861,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import JsonValue
 
-
 class PassThroughBag(BaseModel):
     """Untyped-at-schema, target-validated-at-codec pass-through container."""
 
     model_config = ConfigDict(extra="forbid")
 
     items: dict[str, JsonValue] = Field(default_factory=dict)
-
 
 __all__ = ["PassThroughBag"]
 ```
@@ -2729,7 +2883,9 @@ git commit -m "feat(schema): add Profile overlay and PassThroughBag containers"
 
 ---
 
-### Task D5: `neutral.py` — composing the eight domains, profiles, and pass-through
+### Task: `schema-neutral` — composed Neutral root model
+
+**Depends on:** schema-overlay
 
 **Files:**
 - Create: `src/chameleon/schema/neutral.py`
@@ -2755,14 +2911,12 @@ from chameleon.schema.identity import ReasoningEffort
 from chameleon.schema.neutral import Neutral
 from chameleon.schema.passthrough import PassThroughBag
 
-
 def test_minimal_neutral() -> None:
     n = Neutral(schema_version=1)
     assert n.schema_version == 1
     assert n.identity is not None  # default Identity()
     assert n.profiles == {}
     assert n.targets == {}
-
 
 def test_full_neutral_round_trip() -> None:
     n = Neutral(
@@ -2777,11 +2931,9 @@ def test_full_neutral_round_trip() -> None:
     assert n.identity.model[BUILTIN_CLAUDE] == "claude-sonnet-4-7"
     assert n.identity.model[BUILTIN_CODEX] == "gpt-5.4"
 
-
 def test_schema_version_required() -> None:
     with pytest.raises(ValidationError):
         Neutral()  # type: ignore[call-arg]
-
 
 def test_passthrough_keyed_by_target_id() -> None:
     n = Neutral(
@@ -2790,7 +2942,6 @@ def test_passthrough_keyed_by_target_id() -> None:
     )
     assert BUILTIN_CLAUDE in n.targets
     assert n.targets[BUILTIN_CLAUDE].items["voice"] == {"enabled": True}
-
 
 def test_neutral_validates_example_yaml(tmp_path: Path) -> None:
     # The example YAML in tests/golden must round-trip through Neutral.
@@ -2862,7 +3013,7 @@ targets:
 uv run pytest tests/unit/test_schema_neutral.py -v
 ```
 
-ImportError. Note that the test imports `yaml` from PyYAML; we'll use `ruamel.yaml` in production (Phase E) but PyYAML is fine for tests since hypothesis pulls it in transitively. If not present, add `pyyaml` to the dev group temporarily — or use `ruamel.yaml` here too (we depend on it for production anyway, so it's already in the venv after `uv sync`).
+ImportError. Note that the test imports `yaml` from PyYAML; we'll use `ruamel.yaml` in production (the io-* tasks) but PyYAML is fine for tests since hypothesis pulls it in transitively. If not present, add `pyyaml` to the dev group temporarily — or use `ruamel.yaml` here too (we depend on it for production anyway, so it's already in the venv after `uv sync`).
 
 Replace the import in the test:
 
@@ -2900,7 +3051,6 @@ from chameleon.schema.profiles import Profile
 # requires an explicit migration spec (§15.10).
 SchemaVersion = Literal[1]
 
-
 class Neutral(BaseModel):
     """The complete neutral form.
 
@@ -2928,7 +3078,6 @@ class Neutral(BaseModel):
     # Per-target pass-through.
     targets: dict[TargetId, PassThroughBag] = Field(default_factory=dict)
 
-
 __all__ = ["Neutral", "SchemaVersion"]
 ```
 
@@ -2943,9 +3092,9 @@ git commit -m "feat(schema): compose Neutral from domains, profiles, pass-throug
 
 ---
 
-## Phase E — I/O Layer (YAML, JSON, TOML)
+### Task: `io-yaml` — comment-preserving YAML I/O via ruamel.yaml
 
-### Task E1: `io/yaml.py` — comment-preserving YAML I/O
+**Depends on:** scaffold-pyproject
 
 **Files:**
 - Create: `src/chameleon/io/__init__.py`
@@ -2963,14 +3112,12 @@ from pathlib import Path
 
 from chameleon.io.yaml import dump_yaml, load_yaml
 
-
 def test_yaml_round_trips_preserves_keys_and_values(tmp_path: Path) -> None:
     src = "a: 1\nb:\n  c: 2\n  d: [1, 2, 3]\n"
     parsed = load_yaml(src)
     out = dump_yaml(parsed)
     re_parsed = load_yaml(out)
     assert re_parsed == parsed
-
 
 def test_yaml_preserves_comments(tmp_path: Path) -> None:
     src = "# top comment\na: 1  # inline\nb: 2\n"
@@ -2979,14 +3126,12 @@ def test_yaml_preserves_comments(tmp_path: Path) -> None:
     assert "# top comment" in out
     assert "# inline" in out
 
-
 def test_yaml_preserves_key_order() -> None:
     src = "z: 1\na: 2\nm: 3\n"
     parsed = load_yaml(src)
     out = dump_yaml(parsed)
     # key order must match input (insertion-preserving)
     assert out.index("z:") < out.index("a:") < out.index("m:")
-
 
 def test_load_yaml_from_path(tmp_path: Path) -> None:
     p = tmp_path / "x.yaml"
@@ -3024,7 +3169,6 @@ _YAML = YAML(typ="rt")
 _YAML.preserve_quotes = True
 _YAML.indent(mapping=2, sequence=4, offset=2)
 
-
 def load_yaml(source: str | Path) -> object:
     """Parse YAML from a string or path; returns ruamel CommentedMap/Seq.
 
@@ -3035,7 +3179,6 @@ def load_yaml(source: str | Path) -> object:
         with source.open("r", encoding="utf-8") as fh:
             return _YAML.load(fh)
     return _YAML.load(source)
-
 
 def dump_yaml(data: object) -> str:
     """Serialize a parsed-YAML object back to a string.
@@ -3048,14 +3191,12 @@ def dump_yaml(data: object) -> str:
     _YAML.dump(data, buf)
     return buf.getvalue()
 
-
 def write_yaml(data: object, path: Path) -> None:
     """Atomically write YAML to a file (write-temp + rename)."""
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8") as fh:
         _YAML.dump(data, fh)
     tmp.replace(path)
-
 
 __all__ = ["dump_yaml", "load_yaml", "write_yaml"]
 ```
@@ -3071,7 +3212,9 @@ git commit -m "feat(io/yaml): comment-preserving load/dump/write via ruamel.yaml
 
 ---
 
-### Task E2: `io/json.py` — order-preserving JSON I/O
+### Task: `io-json` — order-preserving JSON I/O via stdlib json
+
+**Depends on:** scaffold-pyproject
 
 **Files:**
 - Create: `src/chameleon/io/json.py`
@@ -3088,13 +3231,11 @@ from pathlib import Path
 
 from chameleon.io.json import dump_json, load_json
 
-
 def test_json_round_trips() -> None:
     src = '{"a": 1, "b": {"c": 2, "d": [1, 2, 3]}}'
     parsed = load_json(src)
     out = dump_json(parsed)
     assert load_json(out) == parsed
-
 
 def test_json_preserves_key_insertion_order() -> None:
     src = '{"z": 1, "a": 2, "m": 3}'
@@ -3103,14 +3244,12 @@ def test_json_preserves_key_insertion_order() -> None:
     # output order must match input order
     assert out.index('"z"') < out.index('"a"') < out.index('"m"')
 
-
 def test_json_indent_2() -> None:
     out = dump_json({"a": {"b": 1}})
     # two-space indent
     assert "  " in out
     # but not four-space at the same level
     assert "    " in out  # four-space is two levels deep
-
 
 def test_load_json_from_path(tmp_path: Path) -> None:
     p = tmp_path / "x.json"
@@ -3133,12 +3272,10 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 def load_json(source: str | bytes | Path) -> Any:  # noqa: ANN401  -- json IS arbitrary
     if isinstance(source, Path):
         return json.loads(source.read_bytes())
     return json.loads(source)
-
 
 def dump_json(data: Any, *, indent: int = 2) -> str:  # noqa: ANN401
     """Serialize to JSON. Insertion order is preserved.
@@ -3149,12 +3286,10 @@ def dump_json(data: Any, *, indent: int = 2) -> str:  # noqa: ANN401
     """
     return json.dumps(data, indent=indent, sort_keys=False, ensure_ascii=False) + "\n"
 
-
 def write_json(data: Any, path: Path, *, indent: int = 2) -> None:  # noqa: ANN401
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(dump_json(data, indent=indent), encoding="utf-8")
     tmp.replace(path)
-
 
 __all__ = ["dump_json", "load_json", "write_json"]
 ```
@@ -3174,7 +3309,9 @@ git commit -m "feat(io/json): order-preserving load/dump/write via stdlib json"
 
 ---
 
-### Task E3: `io/toml.py` — comment-preserving TOML I/O
+### Task: `io-toml` — comment-preserving TOML I/O via tomlkit
+
+**Depends on:** scaffold-pyproject
 
 **Files:**
 - Create: `src/chameleon/io/toml.py`
@@ -3191,13 +3328,11 @@ from pathlib import Path
 
 from chameleon.io.toml import dump_toml, load_toml
 
-
 def test_toml_round_trips() -> None:
     src = 'a = 1\nb = "two"\n[nested]\nc = 3\n'
     parsed = load_toml(src)
     out = dump_toml(parsed)
     assert load_toml(out) == parsed
-
 
 def test_toml_preserves_comments() -> None:
     src = '# top comment\na = 1  # inline\n[nested]\nb = 2\n'
@@ -3206,13 +3341,11 @@ def test_toml_preserves_comments() -> None:
     assert "# top comment" in out
     assert "# inline" in out
 
-
 def test_toml_preserves_table_order() -> None:
     src = '[zoo]\na = 1\n\n[apples]\nb = 2\n\n[mango]\nc = 3\n'
     parsed = load_toml(src)
     out = dump_toml(parsed)
     assert out.index("[zoo]") < out.index("[apples]") < out.index("[mango]")
-
 
 def test_load_toml_from_path(tmp_path: Path) -> None:
     p = tmp_path / "x.toml"
@@ -3232,13 +3365,11 @@ from pathlib import Path
 import tomlkit
 from tomlkit.toml_document import TOMLDocument
 
-
 def load_toml(source: str | Path) -> TOMLDocument:
     """Parse TOML preserving comments, table order, and value formatting."""
     if isinstance(source, Path):
         return tomlkit.parse(source.read_text(encoding="utf-8"))
     return tomlkit.parse(source)
-
 
 def dump_toml(data: TOMLDocument | dict[str, object]) -> str:
     """Serialize a TOMLDocument or dict back to TOML text.
@@ -3254,12 +3385,10 @@ def dump_toml(data: TOMLDocument | dict[str, object]) -> str:
         doc[k] = v
     return tomlkit.dumps(doc)
 
-
 def write_toml(data: TOMLDocument | dict[str, object], path: Path) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(dump_toml(data), encoding="utf-8")
     tmp.replace(path)
-
 
 __all__ = ["TOMLDocument", "dump_toml", "load_toml", "write_toml"]
 ```
@@ -3275,9 +3404,9 @@ git commit -m "feat(io/toml): comment-preserving load/dump/write via tomlkit"
 
 ---
 
-## Phase F — Codec Protocol, Registry, Target Protocol
+### Task: `codec-protocol` — Codec, FieldPath, TranspileCtx, validate_claimed_paths
 
-### Task F1: `codecs/_protocol.py` — Codec Protocol with claimed_paths discipline
+**Depends on:** types-primitives, types-constants
 
 **Files:**
 - Create: `src/chameleon/codecs/_protocol.py`
@@ -3302,14 +3431,11 @@ from chameleon.codecs._protocol import (
 )
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 
-
 class _NeutralFragment(BaseModel):
     foo: str | None = None
 
-
 class _TargetSection(BaseModel):
     bar: str | None = None
-
 
 class _GoodCodec:
     target = BUILTIN_CLAUDE
@@ -3325,11 +3451,9 @@ class _GoodCodec:
     def from_target(section: _TargetSection, ctx: TranspileCtx) -> _NeutralFragment:
         return _NeutralFragment(foo=section.bar)
 
-
 def test_codec_runtime_check_passes() -> None:
     # Codec is a Protocol; runtime_checkable check should accept _GoodCodec.
     assert isinstance(_GoodCodec, Codec)  # type: ignore[arg-type]
-
 
 def test_validate_claimed_paths_accepts_existing_field() -> None:
     # FullModel has a "bar" field; the path ("bar",) is valid.
@@ -3339,14 +3463,12 @@ def test_validate_claimed_paths_accepts_existing_field() -> None:
 
     validate_claimed_paths(_GoodCodec, FullModel)
 
-
 def test_validate_claimed_paths_rejects_missing_field() -> None:
     class FullModel(BaseModel):
         unrelated: str | None = None
 
     with pytest.raises(ValueError, match="bar"):
         validate_claimed_paths(_GoodCodec, FullModel)
-
 
 def test_loss_warning_typed() -> None:
     ctx = TranspileCtx()
@@ -3375,7 +3497,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from chameleon._types import FieldPath, TargetId
 from chameleon.schema._constants import Domains
 
-
 class LossWarning(BaseModel):
     """A typed warning emitted by a codec when encoding is documented-lossy."""
 
@@ -3385,7 +3506,6 @@ class LossWarning(BaseModel):
     target: TargetId
     message: str
     field_path: FieldPath | None = None
-
 
 class TranspileCtx:
     """Per-merge mutable context passed to every codec invocation.
@@ -3402,7 +3522,6 @@ class TranspileCtx:
     def warn(self, w: LossWarning) -> None:
         self.warnings.append(w)
 
-
 @runtime_checkable
 class Codec(Protocol):
     """Codec protocol — pure (target, domain) translator.
@@ -3412,7 +3531,7 @@ class Codec(Protocol):
     type are not declared here as class vars (Python's typing.Protocol
     can't easily express "claims a Pydantic submodel type"); instead
     they're documented via the codec's docstring + caught by the
-    schema-drift test in Phase F2.
+    schema-drift test in the schema-drift test.
     """
 
     target: ClassVar[TargetId]
@@ -3425,7 +3544,6 @@ class Codec(Protocol):
 
     @staticmethod
     def from_target(section: BaseModel, ctx: TranspileCtx) -> BaseModel: ...
-
 
 def validate_claimed_paths(codec: Codec, full_model: type[BaseModel]) -> None:
     """At registry-load time, walk each codec's claimed_paths through
@@ -3460,7 +3578,6 @@ def validate_claimed_paths(codec: Codec, full_model: type[BaseModel]) -> None:
             # Walk into nested BaseModel; otherwise stop (terminal).
             current = ann if isinstance(ann, type) and issubclass(ann, BaseModel) else None
 
-
 __all__ = [
     "Codec",
     "LossWarning",
@@ -3480,7 +3597,9 @@ git commit -m "feat(codecs): add Codec protocol, TranspileCtx, validate_claimed_
 
 ---
 
-### Task F2: `codecs/_registry.py` + `targets/_protocol.py` + `targets/_registry.py`
+### Task: `registries-and-target-protocol` — codec registry + target protocol + entry-point discovery
+
+**Depends on:** codec-protocol
 
 **Files:**
 - Create: `src/chameleon/codecs/_registry.py`
@@ -3505,14 +3624,11 @@ from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs._registry import CodecRegistry, DuplicateClaimError
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 
-
 class _Section(BaseModel):
     bar: str | None = None
 
-
 class _Frag(BaseModel):
     foo: str | None = None
-
 
 class _CodecA:
     target = BUILTIN_CLAUDE
@@ -3528,7 +3644,6 @@ class _CodecA:
     def from_target(s: _Section, c: TranspileCtx) -> _Frag:
         return _Frag()
 
-
 class _CodecB:
     target = BUILTIN_CLAUDE
     domain = Domains.DIRECTIVES
@@ -3542,7 +3657,6 @@ class _CodecB:
     @staticmethod
     def from_target(s: _Section, c: TranspileCtx) -> _Frag:
         return _Frag()
-
 
 def test_registry_accepts_distinct_claims() -> None:
     r = CodecRegistry()
@@ -3564,13 +3678,11 @@ def test_registry_accepts_distinct_claims() -> None:
 
     r.register(_CodecC)
 
-
 def test_registry_rejects_duplicate_terminal_claim() -> None:
     r = CodecRegistry()
     r.register(_CodecA)
     with pytest.raises(DuplicateClaimError):
         r.register(_CodecB)
-
 
 def test_registry_lookup_by_target_and_domain() -> None:
     r = CodecRegistry()
@@ -3588,7 +3700,6 @@ from chameleon._types import TargetId
 from chameleon.schema._constants import BUILTIN_CLAUDE
 from chameleon.targets._registry import TargetRegistry
 
-
 def test_target_registry_lists_registered() -> None:
     # Built-in entry points register at import time.
     r = TargetRegistry.discover()
@@ -3596,7 +3707,6 @@ def test_target_registry_lists_registered() -> None:
     # Built-ins should be present even before plugins.
     assert "claude" in names
     assert "codex" in names
-
 
 def test_target_registry_lookup() -> None:
     r = TargetRegistry.discover()
@@ -3620,14 +3730,12 @@ from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import Codec
 from chameleon.schema._constants import Domains
 
-
 class DuplicateClaimError(ValueError):
     """Raised when two codecs for the same target claim the same terminal path."""
 
-
 class CodecRegistry:
     """In-memory registry. Built-in codecs register at module import; plugin
-    codecs register via target plugin's class wiring (Phase I).
+    codecs register via target plugin's class wiring (claude-assembler / codex-assembler tasks).
     """
 
     def __init__(self) -> None:
@@ -3669,7 +3777,6 @@ class CodecRegistry:
     def for_target(self, target: TargetId) -> list[Codec]:
         return [c for (t, _d), c in self._by_key.items() if t == target]
 
-
 __all__ = ["CodecRegistry", "DuplicateClaimError"]
 ```
 
@@ -3697,7 +3804,6 @@ from chameleon._types import FileSpec, TargetId
 from chameleon.codecs._protocol import Codec
 from chameleon.schema._constants import Domains
 
-
 @runtime_checkable
 class Assembler(Protocol):
     target: ClassVar[TargetId]
@@ -3717,13 +3823,11 @@ class Assembler(Protocol):
         files: Mapping[str, bytes],
     ) -> tuple[Mapping[Domains, BaseModel], dict[str, object]]: ...
 
-
 @runtime_checkable
 class Target(Protocol):
     target_id: ClassVar[TargetId]
     assembler: ClassVar[type[Assembler]]
     codecs: ClassVar[tuple[type[Codec], ...]]
-
 
 __all__ = ["Assembler", "Target"]
 ```
@@ -3738,7 +3842,6 @@ import importlib.metadata as md
 
 from chameleon._types import TargetId, register_target_id
 from chameleon.targets._protocol import Target
-
 
 class TargetRegistry:
     """Discovers `chameleon.targets` entry points and binds plugin TargetIds."""
@@ -3761,7 +3864,6 @@ class TargetRegistry:
     def get(self, target_id: TargetId) -> type[Target] | None:
         return self._by_id.get(target_id)
 
-
 __all__ = ["TargetRegistry"]
 ```
 
@@ -3770,7 +3872,7 @@ __all__ = ["TargetRegistry"]
 `src/chameleon/targets/claude/__init__.py` (minimal stub for now):
 
 ```python
-"""Claude target — full wiring lands in Phase I."""
+"""Claude target — full wiring lands in the claude-assembler / codex-assembler tasks."""
 from __future__ import annotations
 
 from typing import ClassVar
@@ -3781,18 +3883,15 @@ from chameleon._types import FileSpec, TargetId
 from chameleon.codecs._protocol import Codec
 from chameleon.schema._constants import BUILTIN_CLAUDE
 
-
 class _PlaceholderModel(BaseModel):
     """Placeholder until codecs/claude/_generated.py and assembler land."""
 
-
 class ClaudeTarget:
     target_id: ClassVar[TargetId] = BUILTIN_CLAUDE
-    # `assembler` and `codecs` are set in Phase I when the assembler exists.
-    # For Phase F we declare them as empty so the protocol-check passes.
+    # `assembler` and `codecs` are set in claude-assembler / codex-assembler tasks (when the assembler exists).
+    # For registries-and-target-protocol we declare them as empty so the protocol-check passes.
     assembler: ClassVar[type] = _PlaceholderModel  # type: ignore[assignment]
     codecs: ClassVar[tuple[type[Codec], ...]] = ()
-
 
 __all__ = ["ClaudeTarget"]
 ```
@@ -3800,7 +3899,7 @@ __all__ = ["ClaudeTarget"]
 `src/chameleon/targets/codex/__init__.py` (parallel stub):
 
 ```python
-"""Codex target — full wiring lands in Phase I."""
+"""Codex target — full wiring lands in the claude-assembler / codex-assembler tasks."""
 from __future__ import annotations
 
 from typing import ClassVar
@@ -3811,16 +3910,13 @@ from chameleon._types import TargetId
 from chameleon.codecs._protocol import Codec
 from chameleon.schema._constants import BUILTIN_CODEX
 
-
 class _PlaceholderModel(BaseModel):
-    """Placeholder until Phase I."""
-
+    """Placeholder until the claude-assembler / codex-assembler tasks."""
 
 class CodexTarget:
     target_id: ClassVar[TargetId] = BUILTIN_CODEX
     assembler: ClassVar[type] = _PlaceholderModel  # type: ignore[assignment]
     codecs: ClassVar[tuple[type[Codec], ...]] = ()
-
 
 __all__ = ["CodexTarget"]
 ```
@@ -3838,7 +3934,9 @@ git commit -m "feat(targets,codecs): registries with entry-point discovery and c
 
 ---
 
-### Task F3: Schema-drift test infrastructure
+### Task: `schema-drift-test` — codec field-path resolution test
+
+**Depends on:** registries-and-target-protocol, claude-assembler, codex-assembler
 
 **Files:**
 - Create: `tests/schema_drift/__init__.py`
@@ -3856,7 +3954,7 @@ into the corresponding _generated.py FullTargetModel.
 
 Run via `uv run pytest -m schema_drift -v`.
 
-In Phase F this test reports zero codecs, which is fine. As Phases G/H
+In registries-and-target-protocol this test reports zero codecs, which is fine. As the Claude/Codex codec tasks
 register V0 codecs, this test exercises validate_claimed_paths against
 the live target models.
 """
@@ -3870,11 +3968,10 @@ from chameleon.targets._registry import TargetRegistry
 
 pytestmark = pytest.mark.schema_drift
 
-
 def test_every_registered_codec_resolves_against_full_model() -> None:
     target_reg = TargetRegistry.discover()
     codec_reg = CodecRegistry()
-    # Built-in targets register their codecs as part of their wiring (Phase I).
+    # Built-in targets register their codecs as part of their wiring (claude-assembler / codex-assembler tasks).
     for tid in target_reg.target_ids():
         target_cls = target_reg.get(tid)
         assert target_cls is not None
@@ -3889,7 +3986,7 @@ def test_every_registered_codec_resolves_against_full_model() -> None:
             validate_claimed_paths(codec, full)
 ```
 
-- [ ] **Step 2: Run gates (this test passes vacuously in Phase F)**
+- [ ] **Step 2: Run gates (this test passes vacuously in registries-and-target-protocol)**
 
 ```sh
 uv run pytest tests/schema_drift/ -v
@@ -3905,13 +4002,13 @@ git commit -m "test(schema_drift): scaffold codec field-path resolution test"
 
 ---
 
-## Phase G — Claude V0 Codecs
-
 Codecs implement the typed `(target, domain)` translator pair. Each task in this phase produces ONE codec module with paired forward/reverse functions plus property-based round-trip tests via hypothesis.
 
-> **Discovery step (do this once at the start of Phase G):** Open `src/chameleon/codecs/claude/_generated.py` and identify the actual class name codegen produced for the root settings model. Throughout this phase we refer to it as `ClaudeSettings`. If the codegen-produced name differs (e.g. `ClaudeCodeSettings`), use the alias re-export from Task C2 step 5 so all codec modules import a stable name `from chameleon.codecs.claude import ClaudeSettings`.
+> **Discovery step (do this once at the start of the claude-codec-* tasks):** Open `src/chameleon/codecs/claude/_generated.py` and identify the actual class name codegen produced for the root settings model. Throughout this phase we refer to it as `ClaudeSettings`. If the codegen-produced name differs (e.g. `ClaudeCodeSettings`), use the alias re-export from Task C2 step 5 so all codec modules import a stable name `from chameleon.codecs.claude import ClaudeSettings`.
 
-### Task G1: `codecs/claude/identity.py` — model + reasoning_effort + auth method
+### Task: `claude-codec-identity` — model + reasoning_effort + thinking
+
+**Depends on:** codec-protocol, codegen-claude, schema-identity
 
 **Files:**
 - Create: `src/chameleon/codecs/claude/identity.py`
@@ -3934,7 +4031,6 @@ from chameleon.codecs.claude.identity import ClaudeIdentityCodec, ClaudeIdentity
 from chameleon.schema._constants import BUILTIN_CLAUDE
 from chameleon.schema.identity import Identity, ReasoningEffort
 
-
 # Generate Identity instances with the Claude-specific keys exercised.
 # Codex-specific keys (e.g. model[BUILTIN_CODEX]) are not in scope here:
 # the Claude codec ignores them on forward and re-emits them only via
@@ -3944,7 +4040,6 @@ _reasoning = st.sampled_from(list(ReasoningEffort))
 _thinking = st.booleans()
 _models = st.text(alphabet="abcdefghijklmnopqrstuvwxyz0123456789-.", min_size=3, max_size=40)
 
-
 @st.composite
 def _claude_focused_identities(draw: st.DrawFn) -> Identity:
     return Identity(
@@ -3952,7 +4047,6 @@ def _claude_focused_identities(draw: st.DrawFn) -> Identity:
         thinking=draw(st.one_of(st.none(), _thinking)),
         model={BUILTIN_CLAUDE: draw(_models)} if draw(st.booleans()) else None,
     )
-
 
 @given(_claude_focused_identities())
 def test_round_trip_for_claude_identity(orig: Identity) -> None:
@@ -3967,7 +4061,6 @@ def test_round_trip_for_claude_identity(orig: Identity) -> None:
     if orig.model is not None and BUILTIN_CLAUDE in orig.model:
         assert restored.model is not None
         assert restored.model[BUILTIN_CLAUDE] == orig.model[BUILTIN_CLAUDE]
-
 
 def test_claude_identity_section_is_typed_subset() -> None:
     # Every claimed_paths element must resolve in ClaudeIdentitySection.
@@ -4007,7 +4100,6 @@ from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.identity import Identity, ReasoningEffort
 
-
 class ClaudeIdentitySection(BaseModel):
     """Typed slice of ClaudeSettings for the identity codec.
 
@@ -4022,7 +4114,6 @@ class ClaudeIdentitySection(BaseModel):
     model: str | None = None
     effortLevel: str | None = None  # noqa: N815  -- mirrors upstream JSON key
     alwaysThinkingEnabled: bool | None = None  # noqa: N815  -- mirrors upstream JSON key
-
 
 class ClaudeIdentityCodec:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
@@ -4082,7 +4173,6 @@ class ClaudeIdentityCodec:
             ident.model = {BUILTIN_CLAUDE: section.model}
         return ident
 
-
 __all__ = ["ClaudeIdentityCodec", "ClaudeIdentitySection"]
 ```
 
@@ -4098,7 +4188,9 @@ git commit -m "feat(codecs/claude/identity): forward+reverse for model, effort, 
 
 ---
 
-### Task G2: `codecs/claude/directives.py` — commit_attribution + system_prompt_file
+### Task: `claude-codec-directives` — commit_attribution + system_prompt_file
+
+**Depends on:** codec-protocol, codegen-claude, schema-domains
 
 **Files:**
 - Create: `src/chameleon/codecs/claude/directives.py`
@@ -4115,7 +4207,6 @@ from hypothesis import given, strategies as st
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.claude.directives import ClaudeDirectivesCodec
 from chameleon.schema.directives import Directives
-
 
 @given(
     spf=st.one_of(st.none(), st.text(min_size=1, max_size=200)),
@@ -4156,18 +4247,15 @@ from chameleon.codecs._protocol import TranspileCtx
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.directives import Directives
 
-
 class ClaudeAttribution(BaseModel):
     model_config = ConfigDict(extra="forbid")
     commit: str | None = None
     pr: str | None = None
 
-
 class ClaudeDirectivesSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     outputStyle: str | None = None  # noqa: N815
     attribution: ClaudeAttribution = ClaudeAttribution()
-
 
 class ClaudeDirectivesCodec:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
@@ -4196,7 +4284,6 @@ class ClaudeDirectivesCodec:
             commit_attribution=section.attribution.commit,
         )
 
-
 __all__ = [
     "ClaudeAttribution",
     "ClaudeDirectivesCodec",
@@ -4215,7 +4302,9 @@ git commit -m "feat(codecs/claude/directives): forward+reverse for commit_attrib
 
 ---
 
-### Task G3: `codecs/claude/capabilities.py` — mcp_servers
+### Task: `claude-codec-capabilities` — mcp_servers (stdio + http)
+
+**Depends on:** codec-protocol, codegen-claude, schema-domains
 
 **Files:**
 - Create: `src/chameleon/codecs/claude/capabilities.py`
@@ -4230,7 +4319,6 @@ from __future__ import annotations
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.claude.capabilities import ClaudeCapabilitiesCodec
 from chameleon.schema.capabilities import Capabilities, McpServerStdio
-
 
 def test_round_trip_stdio() -> None:
     orig = Capabilities(
@@ -4250,7 +4338,6 @@ def test_round_trip_stdio() -> None:
     assert server.args == ["-y", "@modelcontextprotocol/server-memory"]
     assert server.env == {"X": "1"}
 
-
 def test_round_trip_empty() -> None:
     orig = Capabilities()
     ctx = TranspileCtx()
@@ -4268,7 +4355,7 @@ Claude's MCP server definitions live in two files (per the design spec
 §10.2): `~/.claude.json` (user-level mcpServers map) and `.mcp.json`
 (project-level). For V0 we serialize the operator's neutral
 `capabilities.mcp_servers` mapping into the user-level location; the
-assembler (Phase I) is what splits across files.
+assembler (claude-assembler / codex-assembler tasks) is what splits across files.
 
 This codec works on a synthetic section that bundles the mcpServers
 map. The settings.json side is `enabledMcpjsonServers` /
@@ -4291,7 +4378,6 @@ from chameleon.schema.capabilities import (
     McpServerStreamableHttp,
 )
 
-
 class _ClaudeMcpServerStdio(BaseModel):
     """Claude's user-level mcpServers entry shape (stdio variant)."""
 
@@ -4301,7 +4387,6 @@ class _ClaudeMcpServerStdio(BaseModel):
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
 
-
 class _ClaudeMcpServerHttp(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -4309,11 +4394,9 @@ class _ClaudeMcpServerHttp(BaseModel):
     bearer_token_env_var: str | None = None
     http_headers: dict[str, str] = Field(default_factory=dict)
 
-
 # Claude's mcpServers entry is a discriminated union in practice;
 # we model it as a union for clarity and let the disassembler dispatch.
 _ClaudeMcpServer = _ClaudeMcpServerStdio | _ClaudeMcpServerHttp
-
 
 class ClaudeCapabilitiesSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -4321,7 +4404,6 @@ class ClaudeCapabilitiesSection(BaseModel):
     mcpServers: dict[str, _ClaudeMcpServer] = Field(default_factory=dict)  # noqa: N815
     enabledMcpjsonServers: list[str] = Field(default_factory=list)  # noqa: N815
     disabledMcpjsonServers: list[str] = Field(default_factory=list)  # noqa: N815
-
 
 class ClaudeCapabilitiesCodec:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
@@ -4384,7 +4466,6 @@ class ClaudeCapabilitiesCodec:
                 )
         return Capabilities(mcp_servers=servers)
 
-
 __all__ = ["ClaudeCapabilitiesCodec", "ClaudeCapabilitiesSection"]
 ```
 
@@ -4399,7 +4480,9 @@ git commit -m "feat(codecs/claude/capabilities): forward+reverse for mcp_servers
 
 ---
 
-### Task G4: `codecs/claude/environment.py` — variables (env)
+### Task: `claude-codec-environment` — variables (env)
+
+**Depends on:** codec-protocol, codegen-claude, schema-domains
 
 **Files:**
 - Create: `src/chameleon/codecs/claude/environment.py`
@@ -4416,7 +4499,6 @@ from hypothesis import given, strategies as st
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.claude.environment import ClaudeEnvironmentCodec
 from chameleon.schema.environment import Environment
-
 
 @given(st.dictionaries(st.text(min_size=1, max_size=20), st.text(max_size=200), max_size=10))
 def test_round_trip(vars: dict[str, str]) -> None:
@@ -4442,11 +4524,9 @@ from chameleon.codecs._protocol import TranspileCtx
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.environment import Environment
 
-
 class ClaudeEnvironmentSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     env: dict[str, str] = Field(default_factory=dict)
-
 
 class ClaudeEnvironmentCodec:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
@@ -4464,7 +4544,6 @@ class ClaudeEnvironmentCodec:
     def from_target(section: ClaudeEnvironmentSection, ctx: TranspileCtx) -> Environment:
         return Environment(variables=dict(section.env))
 
-
 __all__ = ["ClaudeEnvironmentCodec", "ClaudeEnvironmentSection"]
 ```
 
@@ -4479,7 +4558,9 @@ git commit -m "feat(codecs/claude/environment): forward+reverse for variables (e
 
 ---
 
-### Task G5: Claude stub codecs for the four deferred domains
+### Task: `claude-codec-stubs` — authorization, lifecycle, interface, governance stubs
+
+**Depends on:** codec-protocol, codegen-claude, schema-deferred
 
 **Files:**
 - Create: `src/chameleon/codecs/claude/authorization.py`
@@ -4506,7 +4587,6 @@ from chameleon.schema.authorization import Authorization
 from chameleon.schema.governance import Governance
 from chameleon.schema.interface import Interface
 from chameleon.schema.lifecycle import Lifecycle
-
 
 @pytest.mark.parametrize(
     ("codec", "fragment"),
@@ -4543,10 +4623,8 @@ from chameleon.codecs._protocol import TranspileCtx
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.authorization import Authorization
 
-
 class ClaudeAuthorizationSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
 
 class ClaudeAuthorizationCodec:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
@@ -4563,7 +4641,6 @@ class ClaudeAuthorizationCodec:
     def from_target(section: ClaudeAuthorizationSection, ctx: TranspileCtx) -> Authorization:
         msg = "Claude authorization codec deferred to follow-on spec (§15.1)"
         raise NotImplementedError(msg)
-
 
 __all__ = ["ClaudeAuthorizationCodec", "ClaudeAuthorizationSection"]
 ```
@@ -4591,11 +4668,11 @@ git commit -m "feat(codecs/claude): stubs for authorization, lifecycle, interfac
 
 ---
 
-## Phase H — Codex V0 Codecs
+Parallel to the claude-codec-* tasks but against the Codex schema. Discovery step: in `src/chameleon/codecs/codex/_generated.py`, identify the root model class name (likely `ConfigToml`); throughout this phase we use `CodexConfig` as the alias from Task C4 step 4.
 
-Parallel to Phase G but against the Codex schema. Discovery step: in `src/chameleon/codecs/codex/_generated.py`, identify the root model class name (likely `ConfigToml`); throughout this phase we use `CodexConfig` as the alias from Task C4 step 4.
+### Task: `codex-codec-identity` — model + model_reasoning_effort
 
-### Task H1: `codecs/codex/identity.py` — model + reasoning_effort + provider
+**Depends on:** codec-protocol, codegen-codex-run, schema-identity
 
 **Files:**
 - Create: `src/chameleon/codecs/codex/identity.py`
@@ -4612,7 +4689,6 @@ from chameleon.codecs.codex.identity import CodexIdentityCodec
 from chameleon.schema._constants import BUILTIN_CODEX
 from chameleon.schema.identity import Identity, ReasoningEffort
 
-
 def test_round_trip_full() -> None:
     orig = Identity(
         reasoning_effort=ReasoningEffort.HIGH,
@@ -4623,7 +4699,6 @@ def test_round_trip_full() -> None:
     restored = CodexIdentityCodec.from_target(section, ctx)
     assert restored.reasoning_effort is ReasoningEffort.HIGH
     assert restored.model == {BUILTIN_CODEX: "gpt-5.4"}
-
 
 def test_round_trip_empty() -> None:
     ctx = TranspileCtx()
@@ -4654,12 +4729,10 @@ from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.identity import Identity, ReasoningEffort
 
-
 class CodexIdentitySection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model: str | None = None
     model_reasoning_effort: str | None = None
-
 
 class CodexIdentityCodec:
     target: ClassVar[TargetId] = BUILTIN_CODEX
@@ -4721,7 +4794,6 @@ class CodexIdentityCodec:
             ident.model = {BUILTIN_CODEX: section.model}
         return ident
 
-
 __all__ = ["CodexIdentityCodec", "CodexIdentitySection"]
 ```
 
@@ -4736,7 +4808,9 @@ git commit -m "feat(codecs/codex/identity): forward+reverse for model + reasonin
 
 ---
 
-### Task H2: `codecs/codex/directives.py`
+### Task: `codex-codec-directives` — model_instructions_file + commit_attribution
+
+**Depends on:** codec-protocol, codegen-codex-run, schema-domains
 
 **Files:**
 - Create: `src/chameleon/codecs/codex/directives.py`
@@ -4753,7 +4827,6 @@ from hypothesis import given, strategies as st
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex.directives import CodexDirectivesCodec
 from chameleon.schema.directives import Directives
-
 
 @given(
     spf=st.one_of(st.none(), st.text(min_size=1, max_size=200)),
@@ -4785,12 +4858,10 @@ from chameleon.codecs._protocol import TranspileCtx
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.directives import Directives
 
-
 class CodexDirectivesSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     model_instructions_file: str | None = None
     commit_attribution: str | None = None
-
 
 class CodexDirectivesCodec:
     target: ClassVar[TargetId] = BUILTIN_CODEX
@@ -4817,7 +4888,6 @@ class CodexDirectivesCodec:
             commit_attribution=section.commit_attribution,
         )
 
-
 __all__ = ["CodexDirectivesCodec", "CodexDirectivesSection"]
 ```
 
@@ -4832,7 +4902,9 @@ git commit -m "feat(codecs/codex/directives): forward+reverse for system_prompt_
 
 ---
 
-### Task H3: `codecs/codex/capabilities.py` — `[mcp_servers.<id>]` table
+### Task: `codex-codec-capabilities` — [mcp_servers.<id>] table
+
+**Depends on:** codec-protocol, codegen-codex-run, schema-domains
 
 **Files:**
 - Create: `src/chameleon/codecs/codex/capabilities.py`
@@ -4847,7 +4919,6 @@ from __future__ import annotations
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex.capabilities import CodexCapabilitiesCodec
 from chameleon.schema.capabilities import Capabilities, McpServerStdio
-
 
 def test_round_trip_stdio() -> None:
     orig = Capabilities(
@@ -4887,14 +4958,12 @@ from chameleon.schema.capabilities import (
     McpServerStreamableHttp,
 )
 
-
 class _CodexMcpServerStdio(BaseModel):
     model_config = ConfigDict(extra="forbid")
     enabled: bool = True
     command: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
-
 
 class _CodexMcpServerHttp(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -4903,14 +4972,11 @@ class _CodexMcpServerHttp(BaseModel):
     bearer_token_env_var: str | None = None
     http_headers: dict[str, str] = Field(default_factory=dict)
 
-
 _CodexMcpServer = _CodexMcpServerStdio | _CodexMcpServerHttp
-
 
 class CodexCapabilitiesSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     mcp_servers: dict[str, _CodexMcpServer] = Field(default_factory=dict)
-
 
 class CodexCapabilitiesCodec:
     target: ClassVar[TargetId] = BUILTIN_CODEX
@@ -4962,7 +5028,6 @@ class CodexCapabilitiesCodec:
                 )
         return Capabilities(mcp_servers=servers)
 
-
 __all__ = ["CodexCapabilitiesCodec", "CodexCapabilitiesSection"]
 ```
 
@@ -4977,7 +5042,9 @@ git commit -m "feat(codecs/codex/capabilities): forward+reverse for mcp_servers 
 
 ---
 
-### Task H4: `codecs/codex/environment.py` — `[shell_environment_policy].set`
+### Task: `codex-codec-environment` — [shell_environment_policy].set
+
+**Depends on:** codec-protocol, codegen-codex-run, schema-domains
 
 **Files:**
 - Create: `src/chameleon/codecs/codex/environment.py`
@@ -4992,7 +5059,6 @@ from __future__ import annotations
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex.environment import CodexEnvironmentCodec
 from chameleon.schema.environment import Environment
-
 
 def test_round_trip() -> None:
     orig = Environment(variables={"CI": "true", "DEBUG": "0"})
@@ -5020,18 +5086,15 @@ from chameleon.codecs._protocol import TranspileCtx
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.environment import Environment
 
-
 class _CodexShellEnvPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     set: dict[str, str] = Field(default_factory=dict)
-
 
 class CodexEnvironmentSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
     shell_environment_policy: _CodexShellEnvPolicy = Field(
         default_factory=_CodexShellEnvPolicy
     )
-
 
 class CodexEnvironmentCodec:
     target: ClassVar[TargetId] = BUILTIN_CODEX
@@ -5051,7 +5114,6 @@ class CodexEnvironmentCodec:
     def from_target(section: CodexEnvironmentSection, ctx: TranspileCtx) -> Environment:
         return Environment(variables=dict(section.shell_environment_policy.set))
 
-
 __all__ = ["CodexEnvironmentCodec", "CodexEnvironmentSection"]
 ```
 
@@ -5066,7 +5128,9 @@ git commit -m "feat(codecs/codex/environment): forward+reverse for variables (sh
 
 ---
 
-### Task H5: Codex stub codecs for the four deferred domains
+### Task: `codex-codec-stubs` — authorization, lifecycle, interface, governance stubs
+
+**Depends on:** codec-protocol, codegen-codex-run, schema-deferred
 
 Create the four stub codec files mirroring Task G5's structure exactly. The only differences: substitute `Codex`/`CODEX`/`BUILTIN_CODEX` for the corresponding Claude tokens, and the spec section reference (still §15.1 etc., target name in the message).
 
@@ -5089,11 +5153,11 @@ git commit -m "feat(codecs/codex): stubs for authorization, lifecycle, interface
 
 ---
 
-## Phase I — Assemblers (Per-Target File Layout Knowledge)
-
 The assembler turns codec outputs into bytes for the live target files, and bytes back into per-domain inputs. It owns the path table, partial-ownership flags, and format selection.
 
-### Task I1: `targets/claude/assembler.py` — settings.json + .mcp.json + ~/.claude.json
+### Task: `claude-assembler` — settings.json + .mcp.json + ~/.claude.json (partial-owned)
+
+**Depends on:** claude-codec-identity, claude-codec-directives, claude-codec-capabilities, claude-codec-environment, claude-codec-stubs, registries-and-target-protocol, io-json
 
 **Files:**
 - Modify: `src/chameleon/targets/claude/__init__.py` (replace placeholder with real wiring)
@@ -5115,7 +5179,6 @@ from chameleon.codecs.claude.identity import ClaudeIdentitySection
 from chameleon.schema._constants import Domains
 from chameleon.targets.claude.assembler import ClaudeAssembler
 
-
 def test_assemble_writes_settings_json_with_only_owned_keys() -> None:
     section = ClaudeIdentitySection(model="claude-sonnet-4-7", effortLevel="high")
     files = ClaudeAssembler.assemble(
@@ -5128,7 +5191,6 @@ def test_assemble_writes_settings_json_with_only_owned_keys() -> None:
     assert '"model"' in text
     assert '"effortLevel"' in text
 
-
 def test_disassemble_round_trips_minimal() -> None:
     section = ClaudeIdentitySection(model="claude-sonnet-4-7")
     files = ClaudeAssembler.assemble(
@@ -5139,7 +5201,6 @@ def test_disassemble_round_trips_minimal() -> None:
     assert Domains.IDENTITY in domains
     restored = domains[Domains.IDENTITY]
     assert getattr(restored, "model", None) == "claude-sonnet-4-7"
-
 
 def test_disassemble_routes_unclaimed_keys_to_passthrough() -> None:
     # If the live settings.json has a key no codec claims (e.g. "voice"),
@@ -5162,7 +5223,7 @@ Owns:
   - ~/.claude.json            (PARTIAL ownership — only `mcpServers` key)
 
 The assembler does not touch the live filesystem; that's the merge engine's
-job (Phase K). The assembler operates purely on bytes-in / bytes-out plus
+job (the merge-engine task). The assembler operates purely on bytes-in / bytes-out plus
 typed per-domain section dicts.
 """
 from __future__ import annotations
@@ -5179,7 +5240,6 @@ from chameleon.codecs.claude.environment import ClaudeEnvironmentCodec, ClaudeEn
 from chameleon.codecs.claude.identity import ClaudeIdentityCodec, ClaudeIdentitySection
 from chameleon.io.json import dump_json, load_json
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
-
 
 class ClaudeAssembler:
     target: ClassVar[TargetId] = BUILTIN_CLAUDE
@@ -5304,7 +5364,6 @@ class ClaudeAssembler:
 
         return per_domain, passthrough
 
-
 __all__ = ["ClaudeAssembler"]
 ```
 
@@ -5329,7 +5388,6 @@ from chameleon.codecs.claude.lifecycle import ClaudeLifecycleCodec
 from chameleon.schema._constants import BUILTIN_CLAUDE
 from chameleon.targets.claude.assembler import ClaudeAssembler
 
-
 class ClaudeTarget:
     target_id: ClassVar[TargetId] = BUILTIN_CLAUDE
     assembler: ClassVar[type[ClaudeAssembler]] = ClaudeAssembler
@@ -5343,7 +5401,6 @@ class ClaudeTarget:
         ClaudeInterfaceCodec,
         ClaudeGovernanceCodec,
     )
-
 
 __all__ = ["ClaudeTarget"]
 ```
@@ -5359,7 +5416,9 @@ git commit -m "feat(targets/claude): assembler with settings.json + partial-owne
 
 ---
 
-### Task I2: `targets/codex/assembler.py` — config.toml + requirements.toml
+### Task: `codex-assembler` — config.toml + requirements.toml
+
+**Depends on:** codex-codec-identity, codex-codec-directives, codex-codec-capabilities, codex-codec-environment, codex-codec-stubs, registries-and-target-protocol, io-toml
 
 **Files:**
 - Modify: `src/chameleon/targets/codex/__init__.py`
@@ -5376,14 +5435,12 @@ from chameleon.codecs.codex.identity import CodexIdentitySection
 from chameleon.schema._constants import Domains
 from chameleon.targets.codex.assembler import CodexAssembler
 
-
 def test_assemble_writes_config_toml() -> None:
     section = CodexIdentitySection(model="gpt-5.4", model_reasoning_effort="high")
     files = CodexAssembler.assemble(per_domain={Domains.IDENTITY: section}, passthrough={})
     text = files[CodexAssembler.CONFIG_TOML].decode("utf-8")
     assert 'model = "gpt-5.4"' in text
     assert 'model_reasoning_effort = "high"' in text
-
 
 def test_disassemble_round_trips() -> None:
     raw = b'model = "gpt-5.4"\nmodel_reasoning_effort = "high"\n'
@@ -5419,7 +5476,6 @@ from chameleon.codecs.codex.environment import CodexEnvironmentSection
 from chameleon.codecs.codex.identity import CodexIdentitySection
 from chameleon.io.toml import dump_toml, load_toml
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
-
 
 class CodexAssembler:
     target: ClassVar[TargetId] = BUILTIN_CODEX
@@ -5526,7 +5582,6 @@ class CodexAssembler:
 
         return per_domain, passthrough
 
-
 __all__ = ["CodexAssembler"]
 ```
 
@@ -5551,7 +5606,6 @@ from chameleon.codecs.codex.lifecycle import CodexLifecycleCodec
 from chameleon.schema._constants import BUILTIN_CODEX
 from chameleon.targets.codex.assembler import CodexAssembler
 
-
 class CodexTarget:
     target_id: ClassVar[TargetId] = BUILTIN_CODEX
     assembler: ClassVar[type[CodexAssembler]] = CodexAssembler
@@ -5565,7 +5619,6 @@ class CodexTarget:
         CodexInterfaceCodec,
         CodexGovernanceCodec,
     )
-
 
 __all__ = ["CodexTarget"]
 ```
@@ -5581,9 +5634,9 @@ git commit -m "feat(targets/codex): assembler with config.toml routing"
 
 ---
 
-## Phase J — State Management (XDG paths, Git, Transactions, Locks, Notices)
+### Task: `state-paths` — XDG-aware path resolution
 
-### Task J1: `state/paths.py` — XDG resolution + per-target state-repo paths
+**Depends on:** types-primitives
 
 **Files:**
 - Create: `src/chameleon/state/__init__.py`
@@ -5601,19 +5654,16 @@ from pathlib import Path
 from chameleon.schema._constants import BUILTIN_CLAUDE
 from chameleon.state.paths import StatePaths
 
-
 def test_state_root_under_xdg(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     paths = StatePaths.resolve()
     assert paths.state_root == tmp_path / "chameleon"
-
 
 def test_target_repo_path(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     paths = StatePaths.resolve()
     repo = paths.target_repo(BUILTIN_CLAUDE)
     assert repo == tmp_path / "chameleon" / "targets" / "claude"
-
 
 def test_neutral_path_under_xdg_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
@@ -5641,7 +5691,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from chameleon._types import TargetId
-
 
 @dataclass(frozen=True)
 class StatePaths:
@@ -5676,7 +5725,6 @@ class StatePaths:
     def target_repo(self, target_id: TargetId) -> Path:
         return self.state_root / "targets" / target_id.value
 
-
 __all__ = ["StatePaths"]
 ```
 
@@ -5691,7 +5739,9 @@ git commit -m "feat(state/paths): XDG-aware path resolution for state-repos and 
 
 ---
 
-### Task J2: `state/git.py` — subprocess-based git wrapper
+### Task: `state-git` — subprocess git wrapper for per-target state-repos
+
+**Depends on:** scaffold-package
 
 **Files:**
 - Create: `src/chameleon/state/git.py`
@@ -5709,12 +5759,10 @@ import pytest
 
 from chameleon.state.git import GitRepo, GitNotInstalled
 
-
 def test_init_creates_repo(tmp_path: Path) -> None:
     repo = GitRepo.init(tmp_path)
     assert (tmp_path / ".git").exists()
     assert repo.head_commit() is None  # no commits yet
-
 
 def test_commit_files(tmp_path: Path) -> None:
     repo = GitRepo.init(tmp_path)
@@ -5727,14 +5775,12 @@ def test_commit_files(tmp_path: Path) -> None:
     assert log[0]["subject"] == "initial: x.txt"
     assert "Merge-Id: abc" in log[0]["trailers"]
 
-
 def test_status_clean(tmp_path: Path) -> None:
     repo = GitRepo.init(tmp_path)
     (tmp_path / "x.txt").write_text("hello\n")
     repo.add_all()
     repo.commit("initial")
     assert repo.is_clean()
-
 
 def test_status_dirty_after_modify(tmp_path: Path) -> None:
     repo = GitRepo.init(tmp_path)
@@ -5762,10 +5808,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
-
 class GitNotInstalled(RuntimeError):
     """Raised when `git` is not in PATH at runtime."""
-
 
 @dataclass(frozen=True)
 class CommitInfo:
@@ -5773,7 +5817,6 @@ class CommitInfo:
     subject: str
     body: str
     trailers: str
-
 
 class GitRepo:
     def __init__(self, path: Path) -> None:
@@ -5889,7 +5932,6 @@ class GitRepo:
             commits.append({"sha": sha, "subject": subject, "body": body, "trailers": trailers})
         return commits
 
-
 __all__ = ["CommitInfo", "GitNotInstalled", "GitRepo"]
 ```
 
@@ -5904,7 +5946,9 @@ git commit -m "feat(state/git): subprocess git wrapper for per-target state-repo
 
 ---
 
-### Task J3: `state/transaction.py` — typed merge marker + recovery detection
+### Task: `state-transaction` — typed merge markers + recovery store
+
+**Depends on:** types-primitives, io-toml
 
 **Files:**
 - Create: `src/chameleon/state/transaction.py`
@@ -5931,11 +5975,9 @@ from chameleon.state.transaction import (
 
 pytestmark = pytest.mark.recovery
 
-
 def test_transaction_id_is_uuid_string() -> None:
     tx = transaction_id()
     assert len(tx) == 36  # uuid4 hex with hyphens
-
 
 def test_round_trip(tmp_path: Path) -> None:
     store = TransactionStore(tmp_path)
@@ -5950,7 +5992,6 @@ def test_round_trip(tmp_path: Path) -> None:
     listed = store.list()
     assert len(listed) == 1
     assert listed[0].merge_id == tx.merge_id
-
 
 def test_clear_removes_marker(tmp_path: Path) -> None:
     store = TransactionStore(tmp_path)
@@ -5981,7 +6022,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from chameleon._types import TargetId
 from chameleon.io.toml import dump_toml, load_toml
 
-
 class MergeTransaction(BaseModel):
     """Persistent record of an in-flight merge.
 
@@ -5998,10 +6038,8 @@ class MergeTransaction(BaseModel):
     neutral_lkg_hash_after: str
     partial_owned_hashes: dict[str, str] = Field(default_factory=dict)
 
-
 def transaction_id() -> str:
     return str(uuid.uuid4())
-
 
 class TransactionStore:
     def __init__(self, dir_path: Path) -> None:
@@ -6027,7 +6065,6 @@ class TransactionStore:
         if path.exists():
             path.unlink()
 
-
 __all__ = ["MergeTransaction", "TransactionStore", "transaction_id"]
 ```
 
@@ -6042,7 +6079,9 @@ git commit -m "feat(state/transaction): typed merge markers and recovery store"
 
 ---
 
-### Task J4: `state/locks.py` and `state/notices.py`
+### Task: `state-locks-notices` — partial-owned write discipline + login notices
+
+**Depends on:** types-primitives, io-toml
 
 **Files:**
 - Create: `src/chameleon/state/locks.py`
@@ -6066,10 +6105,8 @@ from chameleon.state.locks import partial_owned_write
 
 pytestmark = pytest.mark.concurrency
 
-
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
 
 def test_partial_owned_write_preserves_unowned_keys(tmp_path: Path) -> None:
     target = tmp_path / "claude.json"
@@ -6085,7 +6122,6 @@ def test_partial_owned_write_preserves_unowned_keys(tmp_path: Path) -> None:
     final = target.read_text(encoding="utf-8")
     assert '"oauth_token"' in final
     assert '"new"' in final
-
 
 def test_partial_owned_write_detects_concurrent_modification(tmp_path: Path) -> None:
     """If the file changes between read and write, partial_owned_write
@@ -6123,7 +6159,6 @@ from pathlib import Path
 
 from chameleon.state.notices import LoginNotice, NoticeStore
 
-
 def test_notice_round_trip(tmp_path: Path) -> None:
     store = NoticeStore(tmp_path)
     notice = LoginNotice(
@@ -6137,7 +6172,6 @@ def test_notice_round_trip(tmp_path: Path) -> None:
     listed = store.list()
     assert len(listed) == 1
     assert listed[0].merge_id == "abc-123"
-
 
 def test_clear_all(tmp_path: Path) -> None:
     store = NoticeStore(tmp_path)
@@ -6179,10 +6213,8 @@ import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
-
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
 
 @contextlib.contextmanager
 def _flock(path: Path) -> Iterator[None]:
@@ -6198,7 +6230,6 @@ def _flock(path: Path) -> Iterator[None]:
             fcntl.flock(target_fd.fileno(), fcntl.LOCK_UN)
     finally:
         target_fd.close()
-
 
 def partial_owned_write(
     path: Path,
@@ -6245,7 +6276,6 @@ def partial_owned_write(
         tmp.write_text(json.dumps(merged, indent=2, sort_keys=False) + "\n", encoding="utf-8")
         tmp.replace(path)
 
-
 __all__ = ["partial_owned_write"]
 ```
 
@@ -6262,7 +6292,6 @@ from pydantic import BaseModel, ConfigDict
 
 from chameleon.io.toml import dump_toml, load_toml
 
-
 class LoginNotice(BaseModel):
     """Persistent surface for a non-interactive merge that failed."""
 
@@ -6273,7 +6302,6 @@ class LoginNotice(BaseModel):
     exit_code: int
     reason: str
     report_path: str
-
 
 class NoticeStore:
     def __init__(self, dir_path: Path) -> None:
@@ -6300,7 +6328,6 @@ class NoticeStore:
         for path in self.dir.glob("*.toml"):
             path.unlink()
 
-
 __all__ = ["LoginNotice", "NoticeStore"]
 ```
 
@@ -6316,11 +6343,11 @@ git commit -m "feat(state): partial-owned write discipline + login notices"
 
 ---
 
-## Phase K — Merge Engine
-
 The merge engine implements the four-source change model (§4.3), conflict classification (§5.3), resolution (§5), and orchestrates assembler + codec + state-repo writes.
 
-### Task K1: `merge/changeset.py` — typed change-source records and classification
+### Task: `merge-changeset` — four-source change classification
+
+**Depends on:** types-primitives, types-constants
 
 **Files:**
 - Create: `src/chameleon/merge/__init__.py`
@@ -6342,10 +6369,8 @@ from chameleon.merge.changeset import (
 )
 from chameleon.schema._constants import BUILTIN_CLAUDE, BUILTIN_CODEX, Domains
 
-
 def _path(*segs: str) -> FieldPath:
     return FieldPath(segments=segs)
-
 
 def test_unchanged_returns_unchanged() -> None:
     record = ChangeRecord(
@@ -6356,7 +6381,6 @@ def test_unchanged_returns_unchanged() -> None:
         per_target={BUILTIN_CLAUDE: 1, BUILTIN_CODEX: 1},
     )
     assert classify_change(record).outcome is ChangeOutcome.UNCHANGED
-
 
 def test_neutral_only_change_consensual() -> None:
     record = ChangeRecord(
@@ -6370,7 +6394,6 @@ def test_neutral_only_change_consensual() -> None:
     assert out.outcome is ChangeOutcome.CONSENSUAL
     assert out.resolved_value == "high"
     assert out.winning_source is ChangeSource.NEUTRAL
-
 
 def test_single_target_drift_consensual() -> None:
     record = ChangeRecord(
@@ -6386,7 +6409,6 @@ def test_single_target_drift_consensual() -> None:
     assert out.winning_source is ChangeSource.TARGET
     assert out.winning_target == BUILTIN_CLAUDE
 
-
 def test_cross_target_conflict() -> None:
     record = ChangeRecord(
         domain=Domains.ENVIRONMENT,
@@ -6398,7 +6420,6 @@ def test_cross_target_conflict() -> None:
     out = classify_change(record)
     assert out.outcome is ChangeOutcome.CONFLICT
 
-
 def test_neutral_vs_target_conflict() -> None:
     record = ChangeRecord(
         domain=Domains.IDENTITY,
@@ -6409,7 +6430,6 @@ def test_neutral_vs_target_conflict() -> None:
     )
     out = classify_change(record)
     assert out.outcome is ChangeOutcome.CONFLICT
-
 
 def test_all_change_to_same_value_consensual() -> None:
     record = ChangeRecord(
@@ -6447,17 +6467,14 @@ from pydantic import BaseModel, ConfigDict
 from chameleon._types import FieldPath, TargetId
 from chameleon.schema._constants import Domains
 
-
 class ChangeSource(Enum):
     NEUTRAL = "neutral"
     TARGET = "target"
-
 
 class ChangeOutcome(Enum):
     UNCHANGED = "unchanged"
     CONSENSUAL = "consensual"
     CONFLICT = "conflict"
-
 
 class ChangeRecord(BaseModel):
     """The four sources for a single neutral key.
@@ -6476,7 +6493,6 @@ class ChangeRecord(BaseModel):
     n1: Any  # noqa: ANN401
     per_target: dict[TargetId, Any]
 
-
 class ChangeClassification(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -6484,7 +6500,6 @@ class ChangeClassification(BaseModel):
     resolved_value: Any = None  # noqa: ANN401
     winning_source: ChangeSource | None = None
     winning_target: TargetId | None = None
-
 
 def classify_change(record: ChangeRecord) -> ChangeClassification:
     """Apply §5.3's classification table."""
@@ -6513,7 +6528,6 @@ def classify_change(record: ChangeRecord) -> ChangeClassification:
 
     return ChangeClassification(outcome=ChangeOutcome.CONFLICT)
 
-
 __all__ = [
     "ChangeClassification",
     "ChangeOutcome",
@@ -6534,7 +6548,9 @@ git commit -m "feat(merge/changeset): four-source change classification"
 
 ---
 
-### Task K2: `merge/conflict.py` + `merge/resolve.py` — typed conflict records and resolvers
+### Task: `merge-conflict-and-resolve` — typed Conflict, Strategy, NonInteractiveResolver
+
+**Depends on:** merge-changeset, types-constants
 
 **Files:**
 - Create: `src/chameleon/merge/conflict.py`
@@ -6558,7 +6574,6 @@ from chameleon.merge.resolve import (
 )
 from chameleon.schema._constants import BUILTIN_CLAUDE, BUILTIN_CODEX, Domains, OnConflict
 
-
 def _conflict() -> Conflict:
     return Conflict(
         record=ChangeRecord(
@@ -6570,7 +6585,6 @@ def _conflict() -> Conflict:
         ),
     )
 
-
 def test_strategy_fail_raises() -> None:
     resolver = NonInteractiveResolver(Strategy(kind=OnConflict.FAIL))
     import pytest
@@ -6578,18 +6592,15 @@ def test_strategy_fail_raises() -> None:
     with pytest.raises(RuntimeError):
         resolver.resolve(_conflict())
 
-
 def test_strategy_keep_returns_n0() -> None:
     resolver = NonInteractiveResolver(Strategy(kind=OnConflict.KEEP))
     result = resolver.resolve(_conflict())
     assert result is None  # KEEP = leave alone
 
-
 def test_strategy_prefer_neutral_returns_n1() -> None:
     resolver = NonInteractiveResolver(Strategy(kind=OnConflict.PREFER_NEUTRAL))
     result = resolver.resolve(_conflict())
     assert result == "claude-sonnet-4-7"
-
 
 def test_strategy_prefer_target_returns_target_value() -> None:
     resolver = NonInteractiveResolver(
@@ -6597,7 +6608,6 @@ def test_strategy_prefer_target_returns_target_value() -> None:
     )
     result = resolver.resolve(_conflict())
     assert result == "claude-opus-4-7"
-
 
 def test_on_conflict_to_strategy_parsing() -> None:
     assert on_conflict_to_strategy("fail").kind is OnConflict.FAIL
@@ -6619,14 +6629,12 @@ from pydantic import BaseModel, ConfigDict
 
 from chameleon.merge.changeset import ChangeRecord
 
-
 class Conflict(BaseModel):
     """A neutral key whose four sources cannot be reconciled automatically."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     record: ChangeRecord
-
 
 __all__ = ["Conflict"]
 ```
@@ -6652,13 +6660,11 @@ from chameleon._types import TargetId
 from chameleon.merge.conflict import Conflict
 from chameleon.schema._constants import OnConflict
 
-
 class Strategy(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     kind: OnConflict
     target: TargetId | None = None
-
 
 def on_conflict_to_strategy(raw: str) -> Strategy:
     """Parse the CLI's --on-conflict argument into a typed Strategy."""
@@ -6677,7 +6683,6 @@ def on_conflict_to_strategy(raw: str) -> Strategy:
         "prefer-lkg": OnConflict.PREFER_LKG,
     }
     return Strategy(kind=mapping[raw])
-
 
 class NonInteractiveResolver:
     """Resolve conflicts according to a CLI-supplied Strategy."""
@@ -6707,7 +6712,6 @@ class NonInteractiveResolver:
         msg = f"unknown OnConflict {kind!r}"
         raise RuntimeError(msg)
 
-
 __all__ = ["NonInteractiveResolver", "Strategy", "on_conflict_to_strategy"]
 ```
 
@@ -6722,7 +6726,9 @@ git commit -m "feat(merge): typed Conflict, Strategy, and non-interactive resolv
 
 ---
 
-### Task K3: `merge/drift.py` and `merge/engine.py` — sample/disassemble/classify orchestrator
+### Task: `merge-engine` — four-source merge orchestrator
+
+**Depends on:** merge-conflict-and-resolve, claude-assembler, codex-assembler, state-paths, state-git, state-transaction, state-locks-notices, schema-neutral, io-yaml
 
 **Files:**
 - Create: `src/chameleon/merge/drift.py`
@@ -6743,7 +6749,6 @@ from chameleon.merge.resolve import Strategy
 from chameleon.schema._constants import OnConflict
 from chameleon.state.paths import StatePaths
 from chameleon.targets._registry import TargetRegistry
-
 
 def test_merge_idempotent_when_nothing_changed(monkeypatch, tmp_path: Path) -> None:
     """A merge with no live drift and no neutral edits is a no-op."""
@@ -6787,7 +6792,6 @@ import hashlib
 from collections.abc import Mapping
 from pathlib import Path
 
-
 def file_sha256(path: Path) -> str | None:
     if not path.exists():
         return None
@@ -6795,10 +6799,8 @@ def file_sha256(path: Path) -> str | None:
     h.update(path.read_bytes())
     return h.hexdigest()
 
-
 def has_drift(live_bytes: bytes, head_bytes: bytes) -> bool:
     return live_bytes != head_bytes
-
 
 def map_drift(live: Mapping[str, bytes], head: Mapping[str, bytes]) -> dict[str, bool]:
     """For each repo path, True if live differs from head."""
@@ -6806,7 +6808,6 @@ def map_drift(live: Mapping[str, bytes], head: Mapping[str, bytes]) -> dict[str,
     for k, v in live.items():
         out[k] = has_drift(v, head.get(k, b""))
     return out
-
 
 __all__ = ["file_sha256", "has_drift", "map_drift"]
 ```
@@ -6851,7 +6852,6 @@ from chameleon.state.transaction import (
 )
 from chameleon.targets._registry import TargetRegistry
 
-
 class MergeRequest(BaseModel):
     """Inputs to a merge run beyond what the engine already knows."""
 
@@ -6859,7 +6859,6 @@ class MergeRequest(BaseModel):
 
     profile_name: str | None = None
     dry_run: bool = False
-
 
 class MergeResult(BaseModel):
     """Outcome of a merge run."""
@@ -6869,7 +6868,6 @@ class MergeResult(BaseModel):
     exit_code: int
     summary: str
     merge_id: str | None = None
-
 
 class MergeEngine:
     def __init__(
@@ -7062,7 +7060,6 @@ class MergeEngine:
             merge_id=merge_id,
         )
 
-
 __all__ = ["MergeEngine", "MergeRequest", "MergeResult"]
 ```
 
@@ -7085,15 +7082,15 @@ git commit -m "feat(merge/engine): four-source merge orchestrator with non-inter
 
 ---
 
-## Phase L — CLI Subcommands
-
 The CLI surface (§9). Argparse parses CLI input into typed values
 (`TargetId`, `Domains`, `OnConflict`) before any business logic runs.
 
-### Task L1: argparse skeleton + typed argument parsing
+### Task: `cli-skeleton` — argparse subcommand router with typed parsing
+
+**Depends on:** merge-engine, state-paths, registries-and-target-protocol, schema-neutral, io-yaml
 
 **Files:**
-- Modify: `src/chameleon/cli.py` (replace Phase A skeleton with full subcommand routing)
+- Modify: `src/chameleon/cli.py` (replace scaffold-package skeleton with full subcommand routing)
 - Create: `tests/integration/test_cli_help.py`
 
 - [ ] **Step 1: Write tests**
@@ -7104,18 +7101,15 @@ from __future__ import annotations
 
 from chameleon import cli
 
-
 def test_cli_help_lists_v0_subcommands(capsys) -> None:
     assert cli.main(["--help"]) == 0
     out = capsys.readouterr().out
     for cmd in ("init", "merge", "status", "diff", "log", "adopt", "discard", "validate", "doctor", "targets"):
         assert cmd in out
 
-
 def test_cli_unknown_subcommand_exits_non_zero(capsys) -> None:
     rc = cli.main(["definitely-not-a-command"])
     assert rc != 0
-
 
 def test_cli_merge_dry_run_invokable(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -7150,13 +7144,11 @@ from chameleon.state.paths import StatePaths
 from chameleon.state.transaction import TransactionStore
 from chameleon.targets._registry import TargetRegistry
 
-
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--neutral", type=str, default=None, help="path to the neutral.yaml file")
     parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
-
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -7218,13 +7210,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     return parser
 
-
 def _resolve_paths(args: argparse.Namespace) -> StatePaths:
     from pathlib import Path
 
     override = Path(args.neutral) if args.neutral else None
     return StatePaths.resolve(neutral_override=override)
-
 
 def _cmd_merge(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
@@ -7234,7 +7224,6 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
     sys.stdout.write(result.summary + "\n")
     return result.exit_code
-
 
 def _cmd_init(args: argparse.Namespace) -> int:
     # V0 init: a merge with KEEP if neutral exists, FAIL otherwise. The
@@ -7250,14 +7239,12 @@ def _cmd_init(args: argparse.Namespace) -> int:
     sys.stdout.write(f"init: {result.summary}\n")
     return result.exit_code
 
-
 def _cmd_targets(args: argparse.Namespace) -> int:
     targets = TargetRegistry.discover()
     if args.op == "list":
         for tid in sorted(targets.target_ids(), key=lambda t: t.value):
             sys.stdout.write(f"{tid.value}\n")
     return 0
-
 
 def _cmd_doctor(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
@@ -7283,7 +7270,6 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         return 1
     return 0 if not items else 1
 
-
 def _cmd_validate(args: argparse.Namespace) -> int:
     from chameleon.io.yaml import load_yaml
     from chameleon.schema.neutral import Neutral
@@ -7300,7 +7286,6 @@ def _cmd_validate(args: argparse.Namespace) -> int:
     sys.stdout.write("ok\n")
     return 0
 
-
 def _cmd_status(args: argparse.Namespace) -> int:
     # Status is a dry-run merge; if the run would change anything, exit 1.
     paths = _resolve_paths(args)
@@ -7312,11 +7297,9 @@ def _cmd_status(args: argparse.Namespace) -> int:
     sys.stdout.write(result.summary + "\n")
     return 0 if "nothing to do" in result.summary else 1
 
-
 def _cmd_diff(args: argparse.Namespace) -> int:
     sys.stdout.write(f"diff for {args.target}: not implemented in V0\n")
     return 0
-
 
 def _cmd_log(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
@@ -7332,17 +7315,14 @@ def _cmd_log(args: argparse.Namespace) -> int:
         sys.stdout.write(f"{entry['sha'][:8]}  {entry['subject']}\n")
     return 0
 
-
 def _cmd_adopt(args: argparse.Namespace) -> int:
     args.on_conflict = f"prefer={args.target}"
     args.profile = None
     return _cmd_merge(args)
 
-
 def _cmd_discard(args: argparse.Namespace) -> int:
     sys.stdout.write(f"discard {args.target}: not implemented in V0\n")
     return 0
-
 
 _DISPATCH = {
     "init": _cmd_init,
@@ -7357,7 +7337,6 @@ _DISPATCH = {
     "targets": _cmd_targets,
 }
 
-
 def main(argv: Sequence[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
@@ -7369,7 +7348,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.print_help()
         return 1
     return handler(args)
-
 
 if __name__ == "__main__":
     sys.exit(main())
@@ -7386,7 +7364,9 @@ git commit -m "feat(cli): wire init/merge/status/diff/log/adopt/discard/validate
 
 ---
 
-### Task L2: Polish CLI — `init` 4-cell matrix, exit codes, error messages
+### Task: `cli-init-polish` — bootstrap minimal neutral when missing; idempotent init
+
+**Depends on:** cli-skeleton
 
 **Files:**
 - Modify: `src/chameleon/cli.py` (refine `_cmd_init`)
@@ -7406,7 +7386,6 @@ import pytest
 from chameleon import cli
 from chameleon.io.yaml import dump_yaml
 
-
 def _setup_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     state = tmp_path / "state"
     config = tmp_path / "config"
@@ -7419,13 +7398,11 @@ def _setup_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
     monkeypatch.setenv("HOME", str(home))
     return tmp_path
 
-
 def test_init_no_neutral_no_state_writes_minimal(monkeypatch, tmp_path: Path) -> None:
     _setup_env(monkeypatch, tmp_path)
     rc = cli.main(["init"])
     assert rc == 0
     assert (tmp_path / "config" / "chameleon" / "neutral.yaml").exists()
-
 
 def test_init_with_existing_neutral_idempotent(monkeypatch, tmp_path: Path) -> None:
     _setup_env(monkeypatch, tmp_path)
@@ -7479,9 +7456,9 @@ git commit -m "feat(cli/init): bootstrap minimal neutral when missing; idempoten
 
 ---
 
-## Phase M — Documentation, Final Verification, Skills, V0 Done
+### Task: `docs-login-plugins-schema` — login recipes, plugin authoring, schema reference
 
-### Task M1: Login-time recipes + plugin authoring + schema reference
+**Depends on:** schema-neutral
 
 **Files:**
 - Create: `docs/login/launchd.md`
@@ -7580,7 +7557,9 @@ git commit -m "docs: login-time recipes, plugin authoring guide, neutral schema 
 
 ---
 
-### Task M2: Final verification — full V0 acceptance test
+### Task: `acceptance-test` — V0 end-to-end acceptance
+
+**Depends on:** cli-init-polish, docs-login-plugins-schema, claude-assembler, codex-assembler, schema-drift-test
 
 **Files:**
 - Create: `tests/integration/test_v0_acceptance.py`
@@ -7602,7 +7581,6 @@ from chameleon.io.json import load_json
 from chameleon.io.toml import load_toml
 from chameleon.io.yaml import dump_yaml, load_yaml
 
-
 def _setup_env(monkeypatch, tmp_path: Path) -> dict[str, Path]:
     state = tmp_path / "state"
     config = tmp_path / "config"
@@ -7614,7 +7592,6 @@ def _setup_env(monkeypatch, tmp_path: Path) -> dict[str, Path]:
     monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
     monkeypatch.setenv("HOME", str(home))
     return {"state": state, "config": config, "home": home}
-
 
 def test_full_v0_acceptance(monkeypatch, tmp_path: Path) -> None:
     paths = _setup_env(monkeypatch, tmp_path)
@@ -7692,7 +7669,9 @@ git commit -m "test(integration): V0 end-to-end acceptance — init, edit, merge
 
 ---
 
-### Task M3: Tag V0 and write a CHANGELOG entry
+### Task: `release-tag` — CHANGELOG, version bump, V0 tag
+
+**Depends on:** acceptance-test
 
 **Files:**
 - Create: `CHANGELOG.md`
