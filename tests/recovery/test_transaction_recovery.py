@@ -113,15 +113,6 @@ def _seed_neutral_and_lkg(env: dict[str, Path]) -> None:
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "GAP (Wave-6): MergeEngine.merge() never calls tx_store.write() — "
-        "the marker plumbing exists in state.transaction but is unwired in "
-        "the engine. Once MergeEngine.merge() writes a MergeTransaction "
-        "before the per-FileSpec write loop, this test pins it."
-    ),
-)
 def test_transaction_marker_written_before_live_file_writes(
     exemplar_env: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
@@ -208,15 +199,6 @@ def test_doctor_surfaces_stale_marker(
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "GAP (Wave-6): MergeEngine.merge() does not call tx_store.clear() "
-        "for either its own merge_id or pre-existing markers. Recovery "
-        "semantics — 'a clean merge means previous interruptions were "
-        "resolved' — are not yet enforced; pinning the contract here."
-    ),
-)
 def test_recovery_clears_stale_marker_on_clean_merge(
     exemplar_env: dict[str, Path],
 ) -> None:
@@ -255,16 +237,6 @@ def _sha256_path(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "GAP (Wave-6): MergeTransaction.partial_owned_hashes is declared "
-        "but unpopulated. The engine reads existing live bytes via "
-        "_read_live_files but never hashes them into a marker. The "
-        "exemplar's ~/.claude.json (PARTIAL ownership) is the canonical "
-        "source for this hash; pinning the contract here."
-    ),
-)
 def test_partial_owned_hashes_track_intermediate_state(
     exemplar_env: dict[str, Path],
     monkeypatch: pytest.MonkeyPatch,
