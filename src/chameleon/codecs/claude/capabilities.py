@@ -21,6 +21,9 @@ from chameleon.schema.capabilities import (
     McpServer,
     McpServerStdio,
     McpServerStreamableHttp,
+    PluginEntry,
+    PluginMarketplace,
+    PluginMarketplaceSource,
 )
 
 
@@ -58,12 +61,66 @@ _ClaudeMcpServer = Annotated[
 ]
 
 
+# Claude marketplace source variants — narrowed to the four kinds the
+# neutral ``PluginMarketplaceSource`` models. Other Claude shapes
+# (``hostPattern``, ``npm``, ``directory``) round-trip via per-target
+# pass-through; the codec emits a ``LossWarning`` if it encounters them.
+class _ClaudeMarketplaceSourceGithub(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    source: Literal["github"] = "github"
+    repo: str
+    ref: str | None = None
+
+
+class _ClaudeMarketplaceSourceGit(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    source: Literal["git"] = "git"
+    url: str
+    ref: str | None = None
+
+
+class _ClaudeMarketplaceSourceUrl(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    source: Literal["url"] = "url"
+    url: str
+
+
+class _ClaudeMarketplaceSourceLocal(BaseModel):
+    """Maps to upstream ``directory`` (preferred) or ``file``."""
+
+    model_config = ConfigDict(extra="allow")
+    source: Literal["directory", "file"] = "directory"
+    path: str
+
+
+_ClaudeMarketplaceSource = (
+    _ClaudeMarketplaceSourceGithub
+    | _ClaudeMarketplaceSourceGit
+    | _ClaudeMarketplaceSourceUrl
+    | _ClaudeMarketplaceSourceLocal
+)
+
+
+class _ClaudeMarketplace(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    source: _ClaudeMarketplaceSource = Field(discriminator="source")
+    auto_update: bool | None = Field(default=None, alias="autoUpdate")
+
+
 class ClaudeCapabilitiesSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     mcpServers: dict[str, _ClaudeMcpServer] = Field(default_factory=dict)  # noqa: N815
     enabledMcpjsonServers: list[str] = Field(default_factory=list)  # noqa: N815
     disabledMcpjsonServers: list[str] = Field(default_factory=list)  # noqa: N815
+    # ``enabledPlugins`` and ``extraKnownMarketplaces`` live in
+    # ``~/.claude/settings.json``, not ``~/.claude.json`` — the assembler
+    # routes them accordingly.
+    enabled_plugins: dict[str, bool] = Field(default_factory=dict, alias="enabledPlugins")
+    extra_known_marketplaces: dict[str, _ClaudeMarketplace] = Field(
+        default_factory=dict, alias="extraKnownMarketplaces"
+    )
 
 
 class ClaudeCapabilitiesCodec:
@@ -75,6 +132,11 @@ class ClaudeCapabilitiesCodec:
             FieldPath(segments=("mcpServers",)),
             FieldPath(segments=("enabledMcpjsonServers",)),
             FieldPath(segments=("disabledMcpjsonServers",)),
+            # The schema-drift check resolves alias names against the
+            # upstream-canonized ClaudeCodeSettings model — see ``_generated``
+            # field aliases ``enabledPlugins`` / ``extraKnownMarketplaces``.
+            FieldPath(segments=("enabledPlugins",)),
+            FieldPath(segments=("extraKnownMarketplaces",)),
         }
     )
 
@@ -94,6 +156,10 @@ class ClaudeCapabilitiesCodec:
                     bearer_token_env_var=server.bearer_token_env_var,
                     http_headers=dict(server.http_headers),
                 )
+        for plugin_key, entry in model.plugins.items():
+            section.enabled_plugins[plugin_key] = entry.enabled
+        for mp_name, mp in model.plugin_marketplaces.items():
+            section.extra_known_marketplaces[mp_name] = _claude_marketplace_from_neutral(mp)
         return section
 
     @staticmethod
@@ -125,7 +191,76 @@ class ClaudeCapabilitiesCodec:
                         field_path=FieldPath(segments=("mcpServers",)),
                     )
                 )
-        return Capabilities(mcp_servers=servers)
+        plugins: dict[str, PluginEntry] = {
+            key: PluginEntry(enabled=enabled) for key, enabled in section.enabled_plugins.items()
+        }
+        marketplaces: dict[str, PluginMarketplace] = {}
+        for mp_name, mp in section.extra_known_marketplaces.items():
+            neutral = _claude_marketplace_to_neutral(mp_name, mp, ctx)
+            if neutral is not None:
+                marketplaces[mp_name] = neutral
+        return Capabilities(
+            mcp_servers=servers,
+            plugins=plugins,
+            plugin_marketplaces=marketplaces,
+        )
+
+
+def _claude_marketplace_from_neutral(mp: PluginMarketplace) -> _ClaudeMarketplace:
+    src = mp.source
+    inner: _ClaudeMarketplaceSource
+    if src.kind == "github":
+        if src.repo is None:
+            msg = "PluginMarketplaceSource(kind='github') requires repo"
+            raise ValueError(msg)
+        inner = _ClaudeMarketplaceSourceGithub(repo=src.repo, ref=src.ref)
+    elif src.kind == "git":
+        if src.url is None:
+            msg = "PluginMarketplaceSource(kind='git') requires url"
+            raise ValueError(msg)
+        inner = _ClaudeMarketplaceSourceGit(url=src.url, ref=src.ref)
+    elif src.kind == "url":
+        if src.url is None:
+            msg = "PluginMarketplaceSource(kind='url') requires url"
+            raise ValueError(msg)
+        inner = _ClaudeMarketplaceSourceUrl(url=src.url)
+    elif src.kind == "local":
+        if src.path is None:
+            msg = "PluginMarketplaceSource(kind='local') requires path"
+            raise ValueError(msg)
+        inner = _ClaudeMarketplaceSourceLocal(path=src.path)
+    else:  # pragma: no cover — Literal exhausts the kind set
+        msg = f"unknown marketplace source kind {src.kind!r}"
+        raise ValueError(msg)
+    return _ClaudeMarketplace(source=inner, autoUpdate=mp.auto_update)
+
+
+def _claude_marketplace_to_neutral(
+    name: str, mp: _ClaudeMarketplace, ctx: TranspileCtx
+) -> PluginMarketplace | None:
+    s = mp.source
+    if isinstance(s, _ClaudeMarketplaceSourceGithub):
+        neutral_src = PluginMarketplaceSource(kind="github", repo=s.repo, ref=s.ref)
+    elif isinstance(s, _ClaudeMarketplaceSourceGit):
+        neutral_src = PluginMarketplaceSource(kind="git", url=s.url, ref=s.ref)
+    elif isinstance(s, _ClaudeMarketplaceSourceUrl):
+        neutral_src = PluginMarketplaceSource(kind="url", url=s.url)
+    elif isinstance(s, _ClaudeMarketplaceSourceLocal):
+        neutral_src = PluginMarketplaceSource(kind="local", path=s.path)
+    else:  # pragma: no cover — discriminator exhaustion
+        ctx.warn(
+            LossWarning(
+                domain=Domains.CAPABILITIES,
+                target=BUILTIN_CLAUDE,
+                message=(
+                    f"marketplace {name!r}: unsupported Claude source shape; "
+                    "routing to per-target pass-through"
+                ),
+                field_path=FieldPath(segments=("extraKnownMarketplaces", name)),
+            )
+        )
+        return None
+    return PluginMarketplace(source=neutral_src, auto_update=mp.auto_update)
 
 
 __all__ = ["ClaudeCapabilitiesCodec", "ClaudeCapabilitiesSection"]

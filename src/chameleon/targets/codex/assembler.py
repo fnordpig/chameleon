@@ -73,13 +73,30 @@ class CodexAssembler:
 
         capabilities = per_domain.get(Domains.CAPABILITIES)
         if isinstance(capabilities, CodexCapabilitiesSection):
-            mcp_table = tomlkit.table()
-            for name, server in capabilities.mcp_servers.items():
-                server_table = tomlkit.table()
-                for k, v in server.model_dump(exclude_none=True).items():
-                    server_table[k] = v
-                mcp_table[name] = server_table
-            doc["mcp_servers"] = mcp_table
+            if capabilities.mcp_servers:
+                mcp_table = tomlkit.table()
+                for name, server in capabilities.mcp_servers.items():
+                    server_table = tomlkit.table()
+                    for k, v in server.model_dump(exclude_none=True).items():
+                        server_table[k] = v
+                    mcp_table[name] = server_table
+                doc["mcp_servers"] = mcp_table
+            if capabilities.plugins:
+                plugins_table = tomlkit.table()
+                for plugin_key, entry in capabilities.plugins.items():
+                    p_table = tomlkit.table()
+                    for k, v in entry.model_dump(exclude_none=True).items():
+                        p_table[k] = v
+                    plugins_table[plugin_key] = p_table
+                doc["plugins"] = plugins_table
+            if capabilities.marketplaces:
+                mp_table = tomlkit.table()
+                for mp_name, mp_entry in capabilities.marketplaces.items():
+                    inner = tomlkit.table()
+                    for k, v in mp_entry.model_dump(exclude_none=True).items():
+                        inner[k] = v
+                    mp_table[mp_name] = inner
+                doc["marketplaces"] = mp_table
 
         environment = per_domain.get(Domains.ENVIRONMENT)
         if isinstance(environment, CodexEnvironmentSection):
@@ -152,7 +169,7 @@ class CodexAssembler:
 
         identity_keys = {"model", "model_reasoning_effort"}
         directives_keys = {"model_instructions_file", "commit_attribution"}
-        capabilities_keys = {"mcp_servers"}
+        capabilities_keys = {"mcp_servers", "plugins", "marketplaces"}
         environment_keys = {"shell_environment_policy"}
         authorization_keys = {"sandbox_mode", "sandbox_workspace_write"}
         lifecycle_keys = {"history"}
