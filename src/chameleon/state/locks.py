@@ -9,6 +9,8 @@ import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
 
+from chameleon.io.json import dump_json
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -64,7 +66,11 @@ def partial_owned_write(
                 del merged[k]
 
         tmp = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(json.dumps(merged, indent=2, sort_keys=False) + "\n", encoding="utf-8")
+        # Route through io.json.dump_json so the partial-owned-write path
+        # honours the same `ensure_ascii=False` contract as full-owned
+        # writes — non-ASCII content (em-dashes, smart quotes, emoji,
+        # multilingual user content) survives round-trip. (B4)
+        tmp.write_text(dump_json(merged, indent=2), encoding="utf-8")
         tmp.replace(path)
 
 
