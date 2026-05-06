@@ -187,6 +187,25 @@ class ClaudeDirectivesCodec:
             # commit-trailer templates. We never re-emit the
             # deprecated/community bool aliases.
             section.attribution = ClaudeAttribution(commit=model.commit_attribution)
+        if model.personality is not None:
+            # P1-E — Claude has no personality concept. Drop the value
+            # rather than guess a Claude-side approximation, but surface
+            # the loss as a typed warning so the operator (or a higher
+            # layer) can see what was discarded and why.
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.DIRECTIVES,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "P1-E: directives.personality "
+                        f"({model.personality.value!r}) has no Claude equivalent; "
+                        "dropping during to_target. The value is preserved in "
+                        "neutral and will continue to round-trip through the "
+                        "Codex codec."
+                    ),
+                    field_path=FieldPath(segments=("personality",)),
+                ),
+            )
         return section
 
     @staticmethod
