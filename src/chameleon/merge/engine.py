@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict
 from chameleon._types import TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.io.yaml import dump_yaml, load_yaml
+from chameleon.merge._diffs import FileDiff
 from chameleon.merge.changeset import (
     ChangeOutcome,
     classify_change,
@@ -201,6 +202,11 @@ class MergeResult(BaseModel):
     summary: str
     merge_id: str | None = None
     warnings: list[LossWarning] = []
+    # Populated only on dry-run: one entry per live target file the engine
+    # would have written, with the bytes-before / bytes-after pair the CLI
+    # turns into a unified diff. Empty for non-dry-run callers so they pay
+    # no allocation cost.
+    diffs: list[FileDiff] = []
 
 
 class MergeEngine:
@@ -465,7 +471,11 @@ class MergeEngine:
                     continue
                 per_domain_sections[codec_cls.domain] = section
 
-            existing = self._read_live_files(target_cls) if request.dry_run is False else None
+            # Always read existing live so partial-ownership assemblers
+            # (e.g. ~/.claude.json) layer on the same baseline whether or
+            # not this is a dry-run — otherwise the dry-run diff would
+            # diverge from what a real merge actually writes.
+            existing = self._read_live_files(target_cls)
             target_bag = composed.targets.get(tid, PassThroughBag())
             files = target_cls.assembler.assemble(
                 per_domain=per_domain_sections,
@@ -488,13 +498,46 @@ class MergeEngine:
             seen.add(key)
             all_warnings.append(w)
 
-        # 8. Write live + commit state-repos (skipped on dry_run)
+        # 8. Write live + commit state-repos.
+        #
+        # On dry_run we run the same compose + per-spec planning the real
+        # write loop does, but instead of touching disk we collect a
+        # FileDiff per FileSpec and return them on MergeResult. The CLI
+        # turns those into a unified diff identical to what `chameleon
+        # diff` would print after a real merge. Crucially this skips both
+        # the live writes AND the per-target state-repo git commit; LKG
+        # and neutral file writes are also skipped.
         if request.dry_run:
+            diffs: list[FileDiff] = []
+            for tid, files in target_outputs.items():
+                target_cls = self.targets.get(tid)
+                if target_cls is None:
+                    continue
+                for spec in target_cls.assembler.files:
+                    live_path = Path(os.path.expanduser(spec.live_path))
+                    before = live_path.read_bytes() if live_path.exists() else b""
+                    after = files.get(spec.repo_path, b"")
+                    diffs.append(
+                        FileDiff(
+                            target=tid,
+                            live_path=live_path,
+                            repo_path=spec.repo_path,
+                            before=before,
+                            after=after,
+                        )
+                    )
+            changed_count = sum(1 for d in diffs if d.changed)
+            summary = (
+                f"dry run: {changed_count} file(s) would change"
+                if changed_count
+                else "dry run: nothing to do"
+            )
             return MergeResult(
                 exit_code=0,
-                summary="dry run — no files written",
+                summary=summary,
                 merge_id=merge_id,
                 warnings=all_warnings,
+                diffs=diffs,
             )
 
         any_changed = False

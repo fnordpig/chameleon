@@ -163,6 +163,23 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     resolver = _resolver_from_args(args)
     engine = MergeEngine(targets=targets, paths=paths, resolver=resolver)
     result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
+    # On dry-run, render any FileDiffs as a unified diff (one per file the
+    # engine would have written) before the summary line. Reuses the same
+    # `_emit_diff` colorizer the `chameleon diff` path uses so dry-run and
+    # post-merge `diff` look identical.
+    if args.dry_run and result.diffs:
+        stdout_console = Console(file=sys.stdout, highlight=False, soft_wrap=True)
+        for fd in result.diffs:
+            if not fd.changed:
+                continue
+            diff_text = unified_diff(
+                fd.before,
+                fd.after,
+                label=fd.repo_path,
+                head_label=f"{fd.target.value} live",
+                live_label=f"{fd.target.value} merge",
+            )
+            _emit_diff(diff_text, stdout_console=stdout_console)
     sys.stdout.write(result.summary + "\n")
     # P0-2: print LossWarnings to stderr after the summary so the operator
     # sees what (if anything) was skipped without changing the exit code.
