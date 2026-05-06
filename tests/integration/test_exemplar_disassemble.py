@@ -86,24 +86,26 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
         "P1-A claimed Codex's [plugins.*] and [marketplaces.*] tables; "
         "the capabilities domain should now disassemble from this exemplar"
     )
-    # After Wave-4 the only Codex top-level key in the exemplar that is
-    # still unclaimed is ``approvals_reviewer`` (P1-G — sibling agent's
-    # branch, lands next). Once that merges, expected_passthrough becomes
-    # empty.
-    expected_passthrough = {"approvals_reviewer"}
+    # After Wave-4, every top-level Codex key in the exemplar is claimed
+    # by a codec. ``expected_passthrough`` is therefore empty — if a future
+    # Codex config introduces a new key chameleon doesn't model, this test
+    # surfaces it as an unexpected pass-through entry rather than as silent
+    # data loss.
+    expected_passthrough: set[str] = set()
     missing = expected_passthrough - set(passthrough)
     assert not missing, (
         f"expected passthrough keys missing: {missing}; got passthrough={sorted(passthrough)}"
     )
-    # Conversely: pin the leak guard for every Codex key that's now claimed
-    # by a codec. Any of these reappearing in pass-through means the
+    # Pin the leak guard for every key the parity DAG claimed across
+    # Waves 1-4. Any of these reappearing in pass-through means the
     # routing dispatch silently lost a claim.
     leaked = {
-        "plugins",                          # P1-A
-        "marketplaces",                     # P1-A
-        "personality",                      # P1-E
-        "model_context_window",             # P1-F
-        "model_auto_compact_token_limit",   # P1-F
-        "model_catalog_json",               # P1-F
+        "plugins",  # P1-A
+        "marketplaces",  # P1-A
+        "personality",  # P1-E
+        "model_context_window",  # P1-F
+        "model_auto_compact_token_limit",  # P1-F
+        "model_catalog_json",  # P1-F
+        "approvals_reviewer",  # P1-G
     } & set(passthrough)
     assert not leaked, f"codec-claimed keys leaked to pass-through: {leaked}"

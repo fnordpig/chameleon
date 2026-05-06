@@ -136,6 +136,22 @@ class ClaudeAuthorizationCodec:
                     ),
                 )
             )
+        if model.reviewer is not None:
+            # P1-G — Codex-only field at V0. Claude has no in-config equivalent
+            # (Claude routes approvals through the runtime UI, not config).
+            # The richer authorization unification (Claude pattern allow-lists
+            # ↔ Codex named profiles) is P3, not this gap.
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.AUTHORIZATION,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        f"authorization.reviewer={model.reviewer.value!r} has no "
+                        "Claude equivalent (P1-G); the field is Codex-only — "
+                        "Claude routes approvals via the runtime UI"
+                    ),
+                )
+            )
         return section
 
     @staticmethod

@@ -19,6 +19,26 @@ class DefaultMode(Enum):
     FULL_ACCESS = "full-access"
 
 
+class Reviewer(Enum):
+    """Who reviews escalated approval requests (P1-G).
+
+    Codex-only at the field level today: Codex's ``approvals_reviewer``
+    routes sandbox escapes, blocked network access, MCP approval prompts,
+    and ARC escalations either to the user, to a freshly designed
+    auto-review subagent, or to the legacy guardian subagent. Claude has
+    no in-config equivalent — Claude codec emits a P1-G ``LossWarning``
+    when this field is set.
+
+    Vocabulary mirrors ``codecs.codex._generated.ApprovalsReviewer``;
+    keep the value strings byte-for-byte aligned with the upstream enum
+    so codec mappings stay schema-drift-checkable.
+    """
+
+    USER = "user"
+    AUTO_REVIEW = "auto_review"
+    GUARDIAN_SUBAGENT = "guardian_subagent"
+
+
 class FilesystemPolicy(BaseModel):
     model_config = ConfigDict(extra="forbid")
     allow_read: list[str] = Field(default_factory=list)
@@ -46,6 +66,7 @@ class Authorization(BaseModel):
     allow_patterns: list[str] = Field(default_factory=list)
     ask_patterns: list[str] = Field(default_factory=list)
     deny_patterns: list[str] = Field(default_factory=list)
+    reviewer: Reviewer | None = None
 
 
-__all__ = ["Authorization", "DefaultMode", "FilesystemPolicy", "NetworkPolicy"]
+__all__ = ["Authorization", "DefaultMode", "FilesystemPolicy", "NetworkPolicy", "Reviewer"]
