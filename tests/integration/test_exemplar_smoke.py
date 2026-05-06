@@ -133,15 +133,6 @@ def test_chameleon_diff_detects_manual_drift(exemplar_env: dict[str, Path]) -> N
     )
 
 
-@pytest.mark.xfail(
-    reason="B4: dump_json escapes non-ASCII (~/.claude.json's em-dashes "
-    "in companion.personality become \\u2014). Discard correctly restores "
-    "HEAD bytes via partial_owned_write, but the partial-owned-write path "
-    "re-serializes through dump_json which doesn't pass ensure_ascii=False, "
-    "corrupting non-ASCII UTF-8 chars. "
-    "See docs/superpowers/specs/2026-05-06-smoke-findings.md.",
-    strict=True,
-)
 def test_chameleon_discard_restores_state(exemplar_env: dict[str, Path]) -> None:
     live_settings = exemplar_env["home"] / ".claude" / "settings.json"
     _run(["init"], exemplar_env)
