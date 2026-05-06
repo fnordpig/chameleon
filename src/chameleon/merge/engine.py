@@ -19,7 +19,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from chameleon._types import TargetId
-from chameleon.codecs._protocol import TranspileCtx
+from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge.changeset import (
     ChangeOutcome,
@@ -140,13 +140,21 @@ class MergeRequest(BaseModel):
 
 
 class MergeResult(BaseModel):
-    """Outcome of a merge run."""
+    """Outcome of a merge run.
+
+    ``warnings`` collects every ``LossWarning`` emitted during the merge —
+    both the disassemble fan-out (P0-2: per-domain ``ValidationError``s
+    routed to pass-through) and any codec-emitted lossy-encoding warnings.
+    The CLI surfaces these to stderr so the operator can see what was
+    skipped without having the merge itself fail.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     exit_code: int
     summary: str
     merge_id: str | None = None
+    warnings: list[LossWarning] = []
 
 
 class MergeEngine:
@@ -226,7 +234,10 @@ class MergeEngine:
             if target_cls is None:
                 continue
             live = self._read_live_files(target_cls)
-            domains, passthrough = target_cls.assembler.disassemble(live)
+            # P0-2: pass `ctx` so per-domain ValidationError surfaces as a
+            # LossWarning (collected on the same ctx codecs already use)
+            # rather than aborting the whole merge.
+            domains, passthrough = target_cls.assembler.disassemble(live, ctx=ctx)
             per_target_passthrough[tid] = dict(passthrough)
 
             target_neutral = Neutral(schema_version=1)
@@ -417,9 +428,28 @@ class MergeEngine:
             )
             target_outputs[tid] = dict(files)
 
+        # Aggregate warnings: disassemble (ctx) + re-derive (ctx2). Both
+        # surface on MergeResult so the CLI can show them; dedupe on the
+        # tuple of (target, domain, message) to keep the operator-facing
+        # output noise-free if a single bad section gets re-validated on
+        # a follow-up pass.
+        all_warnings: list[LossWarning] = []
+        seen: set[tuple[TargetId, Domains, str]] = set()
+        for w in ctx.warnings + ctx2.warnings:
+            key = (w.target, w.domain, w.message)
+            if key in seen:
+                continue
+            seen.add(key)
+            all_warnings.append(w)
+
         # 8. Write live + commit state-repos (skipped on dry_run)
         if request.dry_run:
-            return MergeResult(exit_code=0, summary="dry run — no files written", merge_id=merge_id)
+            return MergeResult(
+                exit_code=0,
+                summary="dry run — no files written",
+                merge_id=merge_id,
+                warnings=all_warnings,
+            )
 
         any_changed = False
         for tid, files in target_outputs.items():
@@ -460,12 +490,18 @@ class MergeEngine:
             self.paths.neutral.write_text(composed_yaml, encoding="utf-8")
 
         if not any_changed:
-            return MergeResult(exit_code=0, summary="merge: nothing to do", merge_id=merge_id)
+            return MergeResult(
+                exit_code=0,
+                summary="merge: nothing to do",
+                merge_id=merge_id,
+                warnings=all_warnings,
+            )
 
         return MergeResult(
             exit_code=0,
             summary=f"merge: applied across {len(target_outputs)} target(s)",
             merge_id=merge_id,
+            warnings=all_warnings,
         )
 
 
