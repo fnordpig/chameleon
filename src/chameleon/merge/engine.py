@@ -30,6 +30,7 @@ from chameleon.merge.conflict import Conflict
 from chameleon.merge.resolve import NonInteractiveResolver, Resolver, Strategy
 from chameleon.schema._constants import Domains
 from chameleon.schema.neutral import Neutral
+from chameleon.schema.passthrough import PassThroughBag
 from chameleon.state.git import GitRepo
 from chameleon.state.paths import StatePaths
 from chameleon.state.transaction import (
@@ -115,13 +116,15 @@ class MergeEngine:
         # 2. Sample + disassemble + reverse-codec per target
         ctx = TranspileCtx(profile_name=request.profile_name)
         per_target_neutral: dict[TargetId, Neutral] = {}
+        per_target_passthrough: dict[TargetId, dict[str, object]] = {}
 
         for tid in self.targets.target_ids():
             target_cls = self.targets.get(tid)
             if target_cls is None:
                 continue
             live = self._read_live_files(target_cls)
-            domains, _passthrough = target_cls.assembler.disassemble(live)
+            domains, passthrough = target_cls.assembler.disassemble(live)
+            per_target_passthrough[tid] = dict(passthrough)
 
             target_neutral = Neutral(schema_version=1)
             for codec_cls in target_cls.codecs:
@@ -175,6 +178,25 @@ class MergeEngine:
             domain_cls = type(getattr(composed, c.record.domain.value))
             setattr(composed, c.record.domain.value, domain_cls.model_validate(resolved))
 
+        # 6b. Compose pass-through bags per target.
+        #
+        # `composed.targets[tid].items` already carries n1's authored bag
+        # (via deep-copy of n1 above). Layer the live-disassembled bag on
+        # top — the operator edited live most recently, so its values win
+        # for keys that exist in both. Keys present only in n1 survive.
+        # This is the classify=ADOPT_TARGET equivalent at the bag level;
+        # per-key classification with explicit conflict reporting is a
+        # P2-1 follow-on.
+        for tid, live_bag in per_target_passthrough.items():
+            existing_bag = composed.targets.get(tid, PassThroughBag())
+            merged_items: dict[str, object] = dict(existing_bag.items)
+            for k, v in live_bag.items():
+                merged_items[k] = v
+            # PassThroughBag.items is `dict[str, JsonValue]`; rely on
+            # Pydantic to validate-and-coerce the merged dict (e.g. nested
+            # tomlkit Table values normalize to plain dict at this hop).
+            composed.targets[tid] = PassThroughBag.model_validate({"items": merged_items})
+
         # 7. Re-derive each target from `composed`
         ctx2 = TranspileCtx(profile_name=request.profile_name)
         target_outputs: dict[TargetId, dict[str, bytes]] = {}
@@ -192,9 +214,10 @@ class MergeEngine:
                 per_domain_sections[codec_cls.domain] = section
 
             existing = self._read_live_files(target_cls) if request.dry_run is False else None
+            target_bag = composed.targets.get(tid, PassThroughBag())
             files = target_cls.assembler.assemble(
                 per_domain=per_domain_sections,
-                passthrough={},
+                passthrough=dict(target_bag.items),
                 existing=existing,
             )
             target_outputs[tid] = dict(files)
