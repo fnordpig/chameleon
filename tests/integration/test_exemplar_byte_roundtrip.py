@@ -421,20 +421,14 @@ def test_exemplar_zero_unexpected_passthrough(exemplar_env: dict[str, Path]) -> 
 # --------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Wave-7 finding F1: Claude statusLine.type='command' is dropped "
-        "during round-trip because _ClaudeStatusLine.type carries a "
-        "default and is excluded as a default at serialise time. The "
-        "exemplar ships {type:'command', command:...}; after merge only "
-        "command survives. Fix path: explicitly include `type` in the "
-        "codec emission, OR have the assembler harvest sub-section "
-        "extras the same way B1 harvests top-level extras."
-    ),
-)
 def test_wave7_f1_status_line_type_preserved(exemplar_env: dict[str, Path]) -> None:
-    """Pinned Wave-7 finding — flips green when F1 is fixed."""
+    """Wave-7 F1: ``statusLine.type`` survives round-trip.
+
+    Previously dropped because ``_ClaudeStatusLine.type`` carried a
+    default of ``"command"`` and the assembler dumps interface sections
+    with ``exclude_defaults=True``. Fixed by defaulting ``type`` to
+    ``None`` and having the codec set it explicitly during ``to_target``.
+    """
     home = exemplar_env["home"]
     live_settings = home / ".claude" / "settings.json"
     pre = json.loads(live_settings.read_text(encoding="utf-8"))
@@ -451,21 +445,18 @@ def test_wave7_f1_status_line_type_preserved(exemplar_env: dict[str, Path]) -> N
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Wave-7 finding F2: Codex [marketplaces.<name>] tables lose "
-        "last_updated/last_revision sub-keys after round-trip. The "
-        "marketplace codec models only source/source_type; the per-"
-        "marketplace dict-of-tables shape isn't covered by B1's "
-        "section-level extras harvester. Same shape as B1 but one "
-        "level deeper (dict-of-tables values, not section top-level)."
-    ),
-)
 def test_wave7_f2_codex_marketplace_extras_preserved(
     exemplar_env: dict[str, Path],
 ) -> None:
-    """Pinned Wave-7 finding — flips green when F2 is fixed."""
+    """Wave-7 F2: Codex ``[marketplaces.<name>]`` per-entry extras survive.
+
+    ``last_updated`` / ``last_revision`` (and any other Codex-side
+    cache state) are no longer modeled on ``_CodexMarketplaceEntry``;
+    they ride through as ``__pydantic_extra__`` and the assembler's
+    B1 extras-merge — which already walks dict-of-BaseModel via
+    ``_walk_field_extras`` — splices them back into the freshly-built
+    ``[marketplaces.<name>]`` tables on assemble.
+    """
     home = exemplar_env["home"]
     live_codex = home / ".codex" / "config.toml"
 
