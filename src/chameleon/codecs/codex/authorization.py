@@ -1,14 +1,39 @@
 """Codex codec for the authorization domain.
 
-V0 thin slice (Wave-13 S1 schema rename — codec body is unchanged
-mechanically because we only renamed the type, not its values; S3 will
-rewrite this codec to consume the LCD schema's new ``approval_policy``
-field and to route Codex's named ``[permissions.<name>]`` profiles
-through ``targets.codex.items["permissions"]`` pass-through):
+Wave-13 S3 — LCD scheme. Maps the LCD axes Codex actually has on the
+wire and emits typed ``LossWarning``s for the Claude-only axes.
 
-  sandbox_mode                ↔ sandbox_mode
-  filesystem.allow_write      ↔ [sandbox_workspace_write].writable_roots
-  reviewer (P1-G)             ↔ approvals_reviewer
+Wire claims:
+
+  sandbox_mode (3 LCD enum values)   ↔ sandbox_mode
+    READ_ONLY        ↔ "read-only"
+    WORKSPACE_WRITE  ↔ "workspace-write"
+    FULL_ACCESS      ↔ "danger-full-access"
+  approval_policy (4 LCD enum arms)  ↔ approval_policy
+    UNTRUSTED        ↔ "untrusted"
+    ON_FAILURE       ↔ "on-failure"
+    ON_REQUEST       ↔ "on-request"
+    NEVER            ↔ "never"
+  filesystem.allow_write             ↔ [sandbox_workspace_write].writable_roots
+  reviewer (P1-G)                    ↔ approvals_reviewer
+
+LCD-discipline drops:
+
+  permission_mode → not on the Codex wire. ``to_target`` emits a
+    LossWarning naming the field; ``from_target`` never produces one
+    (Codex has nothing to project from).
+
+  approval_policy granular shape → ``AskForApproval4`` from upstream's
+    discriminated union is a richer BaseModel, not a plain string.
+    Operators authoring it route through
+    ``targets.codex.items["permissions"]`` pass-through. ``from_target``
+    sees the dict shape, emits a LossWarning, and leaves
+    ``approval_policy`` unset on the neutral side; ``to_target`` only
+    emits the 4 plain-enum arms.
+
+Pattern lists (allow/ask/deny) and the network sub-block remain
+LossWarning-on-encode; mapping them to Codex's
+``[permissions.<name>]`` profiles is deferred to §15.1.
 """
 
 from __future__ import annotations
@@ -22,6 +47,7 @@ from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.codecs.codex._generated import ApprovalsReviewer
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.authorization import (
+    ApprovalPolicy,
     Authorization,
     FilesystemPolicy,
     Reviewer,
@@ -37,6 +63,25 @@ _CODEX_TO_SANDBOX_MODE: dict[str, SandboxMode] = {
     "read-only": SandboxMode.READ_ONLY,
     "workspace-write": SandboxMode.WORKSPACE_WRITE,
     "danger-full-access": SandboxMode.FULL_ACCESS,
+}
+
+# Wave-13 S3 — neutral ``ApprovalPolicy`` <-> Codex ``approval_policy``
+# (the 4 plain-enum arms of upstream's ``AskForApproval`` discriminated
+# RootModel union; the 5th arm — ``AskForApproval4`` granular — is a
+# structured BaseModel and lives in pass-through). Wire values use
+# hyphens for ``on-failure`` / ``on-request``; the neutral enum's
+# python-friendly underscores never reach the wire.
+_APPROVAL_POLICY_TO_CODEX: dict[ApprovalPolicy, str] = {
+    ApprovalPolicy.UNTRUSTED: "untrusted",
+    ApprovalPolicy.ON_FAILURE: "on-failure",
+    ApprovalPolicy.ON_REQUEST: "on-request",
+    ApprovalPolicy.NEVER: "never",
+}
+_CODEX_TO_APPROVAL_POLICY: dict[str, ApprovalPolicy] = {
+    "untrusted": ApprovalPolicy.UNTRUSTED,
+    "on-failure": ApprovalPolicy.ON_FAILURE,
+    "on-request": ApprovalPolicy.ON_REQUEST,
+    "never": ApprovalPolicy.NEVER,
 }
 
 # P1-G — neutral ``authorization.reviewer`` <-> Codex ``approvals_reviewer``.
@@ -66,6 +111,17 @@ class CodexAuthorizationSection(BaseModel):
     sandbox_workspace_write: _CodexSandboxWorkspaceWrite = Field(
         default_factory=_CodexSandboxWorkspaceWrite
     )
+    # Wave-13 S3: typed loose to accommodate both the 4 plain-enum arms
+    # of upstream ``AskForApproval`` (a wire string like ``"on-request"``)
+    # AND the ``AskForApproval4`` granular arm (a TOML inline table that
+    # decodes to a dict). The codec resolves the str case to
+    # ``ApprovalPolicy`` and emits a LossWarning + drops on the dict case
+    # — modelling the granular shape in neutral would require inventing
+    # cross-target semantics Claude has no analogue for. Mirrors the
+    # ``sandbox_mode`` and ``approvals_reviewer`` patterns above (typed
+    # loose so unknown wire payloads land here and hit a typed
+    # LossWarning rather than crashing inside Pydantic).
+    approval_policy: str | dict[str, object] | None = None
     # P1-G: stored as the raw wire string (not the upstream ``ApprovalsReviewer``
     # enum) so that an unrecognized value disassembled from live config can
     # land in the section, hit ``from_target``, and emit a typed LossWarning
@@ -82,6 +138,7 @@ class CodexAuthorizationCodec:
         {
             FieldPath(segments=("sandbox_mode",)),
             FieldPath(segments=("sandbox_workspace_write", "writable_roots")),
+            FieldPath(segments=("approval_policy",)),
             FieldPath(segments=("approvals_reviewer",)),
         }
     )
@@ -91,6 +148,21 @@ class CodexAuthorizationCodec:
         section = CodexAuthorizationSection()
         if model.sandbox_mode is not None:
             section.sandbox_mode = _SANDBOX_MODE_TO_CODEX[model.sandbox_mode]
+        if model.approval_policy is not None:
+            section.approval_policy = _APPROVAL_POLICY_TO_CODEX[model.approval_policy]
+        if model.permission_mode is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.AUTHORIZATION,
+                    target=BUILTIN_CODEX,
+                    message=(
+                        "Authorization.permission_mode is a Claude-only axis "
+                        "(no Codex wire equivalent); dropping on Codex encode. "
+                        "Set this field for Claude; Codex's coarse mode lives "
+                        "in Authorization.sandbox_mode."
+                    ),
+                )
+            )
         section.sandbox_workspace_write.writable_roots = list(model.filesystem.allow_write)
         if model.reviewer is not None:
             section.approvals_reviewer = _REVIEWER_TO_CODEX[model.reviewer].value
@@ -150,6 +222,38 @@ class CodexAuthorizationCodec:
                         message=(
                             f"sandbox_mode {section.sandbox_mode!r} has no neutral "
                             f"equivalent in V0 (§15.1)"
+                        ),
+                    )
+                )
+        if section.approval_policy is not None:
+            if isinstance(section.approval_policy, str):
+                policy = _CODEX_TO_APPROVAL_POLICY.get(section.approval_policy)
+                if policy is not None:
+                    auth.approval_policy = policy
+                else:
+                    ctx.warn(
+                        LossWarning(
+                            domain=Domains.AUTHORIZATION,
+                            target=BUILTIN_CODEX,
+                            message=(
+                                f"approval_policy {section.approval_policy!r} is not "
+                                "in the LCD vocabulary (untrusted/on-failure/"
+                                "on-request/never); dropping"
+                            ),
+                        )
+                    )
+            else:
+                # Dict shape — upstream's ``AskForApproval4`` granular arm.
+                # No neutral equivalent under LCD discipline.
+                ctx.warn(
+                    LossWarning(
+                        domain=Domains.AUTHORIZATION,
+                        target=BUILTIN_CODEX,
+                        message=(
+                            "Codex approval_policy granular form has no neutral "
+                            "ApprovalPolicy equivalent (LCD only models the 4 "
+                            "plain-enum arms); routing structured shape to "
+                            "targets.codex.items['permissions'].approval_policy"
                         ),
                     )
                 )

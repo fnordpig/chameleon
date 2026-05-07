@@ -124,6 +124,13 @@ class CodexAssembler:
                 ws = tomlkit.table()
                 ws["writable_roots"] = list(authorization.sandbox_workspace_write.writable_roots)
                 doc["sandbox_workspace_write"] = ws
+            if authorization.approval_policy is not None:
+                # Wave-13 S3 — ``approval_policy`` is either a plain wire
+                # string (the 4 LCD enum arms the codec round-trips) or a
+                # dict (the granular ``AskForApproval4`` arm preserved
+                # raw via section field typing). Both serialise cleanly
+                # via tomlkit's native dict/str handling.
+                doc["approval_policy"] = authorization.approval_policy
             if authorization.approvals_reviewer is not None:
                 doc["approvals_reviewer"] = authorization.approvals_reviewer
 
@@ -274,7 +281,12 @@ class CodexAssembler:
         # Wave-10 §15.x — capabilities.web_search.
         capabilities_keys = {"mcp_servers", "plugins", "marketplaces", "web_search"}
         environment_keys = {"shell_environment_policy"}
-        authorization_keys = {"sandbox_mode", "sandbox_workspace_write", "approvals_reviewer"}
+        authorization_keys = {
+            "sandbox_mode",
+            "sandbox_workspace_write",
+            "approval_policy",
+            "approvals_reviewer",
+        }
         # Wave-10 §15.x — lifecycle.telemetry.exporter ↔ otel.exporter.
         lifecycle_keys = {"history", "otel"}
         interface_keys = {"tui", "file_opener"}
