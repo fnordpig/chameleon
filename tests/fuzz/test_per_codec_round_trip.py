@@ -130,8 +130,11 @@ def _environment_claims(x: Environment) -> dict[str, Any]:
 
 
 def _authorization_claude_claims(x: Authorization) -> dict[str, Any]:
+    # Wave-13 LCD: Claude claims permission_mode (not sandbox_mode — that's
+    # Codex-only and LossWarn'd on Claude encode). filesystem and network
+    # flat-list shapes plus pattern lists remain Claude-claimed.
     return {
-        "sandbox_mode": x.sandbox_mode,
+        "permission_mode": x.permission_mode,
         "fs_allow_read": list(x.filesystem.allow_read),
         "fs_allow_write": list(x.filesystem.allow_write),
         "fs_deny_read": list(x.filesystem.deny_read),
@@ -146,11 +149,12 @@ def _authorization_claude_claims(x: Authorization) -> dict[str, Any]:
 
 
 def _authorization_codex_claims(x: Authorization) -> dict[str, Any]:
-    # Codex codec claims sandbox_mode, filesystem.allow_write, reviewer.
-    # filesystem.{allow_read,deny_read,deny_write} and network.* are
-    # explicitly LossWarning'd by the codec — those are NOT claimed.
+    # Wave-13 LCD: Codex claims sandbox_mode and approval_policy (both
+    # Codex-aligned axes). filesystem.allow_write and reviewer also
+    # claimed. permission_mode is Claude-only and LossWarn'd on Codex.
     return {
         "sandbox_mode": x.sandbox_mode,
+        "approval_policy": x.approval_policy,
         "fs_allow_write": list(x.filesystem.allow_write),
         "reviewer": x.reviewer,
     }
