@@ -78,6 +78,23 @@ class _CodexMarketplaceEntry(BaseModel):
     ``targets._protocol._walk_field_extras`` walks the dict-of-BaseModel
     shape (``dict[str, _CodexMarketplaceEntry]``) and surfaces per-entry
     extras at the right nesting depth.
+
+    Wave-11 F-MP fixes (round-trip preservation):
+
+    * ``auto_update`` (F-AU) — the neutral ``PluginMarketplace.auto_update``
+      flag had no Codex analogue and was previously dropped silently.
+      Codex's upstream ``MarketplaceConfig`` is ``extra='allow'``, so we
+      can carry the bit through as a plain key on the table; Codex itself
+      ignores it on read, but the round-trip via Chameleon recovers it.
+    * ``chameleon_kind`` / ``chameleon_repo`` (F-MP-G, F-MP-U) — neutral
+      ``PluginMarketplaceSource`` distinguishes ``github``/``git``/``url``,
+      but Codex's ``source_type`` enum only has ``git``/``local``. To
+      round-trip the lost discriminator, we stash the original neutral
+      ``kind`` (and the ``repo`` field for ``github``) as Chameleon-
+      namespaced extras on the marketplace table. They appear in
+      ``config.toml`` but are explicitly named so an operator can see
+      what they are; Codex tolerates them via its own ``extra='allow'``
+      shape and the next disassemble recovers the neutral form exactly.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -85,6 +102,15 @@ class _CodexMarketplaceEntry(BaseModel):
     source: str | None = None
     source_type: Literal["git", "local"] | None = None
     ref: str | None = None
+    auto_update: bool | None = None
+    # Chameleon-private round-trip hints — preserve the neutral
+    # ``kind`` discriminator that Codex's two-valued ``source_type``
+    # cannot represent. Only set when the neutral ``kind`` is one of
+    # the Codex-incompatible values (``github`` / ``url``); a plain
+    # neutral ``kind='git'`` or ``kind='local'`` round-trips through
+    # ``source_type`` alone and these stay ``None``.
+    chameleon_kind: Literal["github", "url"] | None = None
+    chameleon_repo: str | None = None
 
 
 class CodexCapabilitiesSection(BaseModel):
@@ -203,40 +229,63 @@ def _codex_marketplace_from_neutral(
     name: str, mp: PluginMarketplace, ctx: TranspileCtx
 ) -> _CodexMarketplaceEntry:
     src = mp.source
-    if src.kind in {"github", "git"}:
-        # Codex serializes both as ``source_type = "git"`` with a URL. ``github``
-        # round-trips through git over HTTPS using the upstream repo path.
+    auto_update = mp.auto_update
+    if src.kind == "github":
+        # Codex's ``source_type`` enum has no ``github`` value, so we
+        # synthesize the canonical HTTPS URL and tag ``source_type='git'``
+        # for upstream Codex compatibility. The original neutral ``kind``
+        # and ``repo`` ride through as Chameleon-namespaced fields so
+        # ``from_target`` can recover the exact ``PluginMarketplaceSource``
+        # the operator authored — without these, ``kind='github'`` would
+        # silently collapse to ``kind='git'`` (F-MP-G).
         url = src.url
-        if url is None and src.kind == "github" and src.repo is not None:
-            url = f"https://github.com/{src.repo}.git"
+        repo = src.repo
+        if url is None and repo is not None:
+            url = f"https://github.com/{repo}.git"
         if url is None:
-            msg = f"marketplace {name!r}: PluginMarketplaceSource missing url/repo"
+            msg = f"marketplace {name!r}: PluginMarketplaceSource(kind='github') requires repo"
             raise ValueError(msg)
-        return _CodexMarketplaceEntry(source=url, source_type="git", ref=src.ref)
+        return _CodexMarketplaceEntry(
+            source=url,
+            source_type="git",
+            ref=src.ref,
+            auto_update=auto_update,
+            chameleon_kind="github",
+            chameleon_repo=repo,
+        )
+    if src.kind == "git":
+        if src.url is None:
+            msg = f"marketplace {name!r}: PluginMarketplaceSource(kind='git') requires url"
+            raise ValueError(msg)
+        return _CodexMarketplaceEntry(
+            source=src.url,
+            source_type="git",
+            ref=src.ref,
+            auto_update=auto_update,
+        )
     if src.kind == "url":
         if src.url is None:
             msg = f"marketplace {name!r}: PluginMarketplaceSource(kind='url') requires url"
             raise ValueError(msg)
-        # Codex has no first-class "raw URL" source; we record the URL but
-        # leave ``source_type`` unset so a Codex restart treats it as
-        # documented operational state rather than a git checkout.
-        ctx.warn(
-            LossWarning(
-                domain=Domains.CAPABILITIES,
-                target=BUILTIN_CODEX,
-                message=(
-                    f"marketplace {name!r}: 'url' source kind has no Codex analogue; "
-                    "recording bare URL with no source_type"
-                ),
-                field_path=FieldPath(segments=("marketplaces", name)),
-            )
+        # Codex's ``source_type`` enum has no ``url`` value. We omit
+        # ``source_type`` (so Codex won't try to git-clone the URL) and
+        # tag ``chameleon_kind='url'`` so the next ``from_target`` recovers
+        # ``kind='url'`` rather than collapsing to ``'git'`` (F-MP-U).
+        return _CodexMarketplaceEntry(
+            source=src.url,
+            source_type=None,
+            auto_update=auto_update,
+            chameleon_kind="url",
         )
-        return _CodexMarketplaceEntry(source=src.url, source_type=None)
     if src.kind == "local":
         if src.path is None:
             msg = f"marketplace {name!r}: PluginMarketplaceSource(kind='local') requires path"
             raise ValueError(msg)
-        return _CodexMarketplaceEntry(source=src.path, source_type="local")
+        return _CodexMarketplaceEntry(
+            source=src.path,
+            source_type="local",
+            auto_update=auto_update,
+        )
     # pragma: no cover — Literal exhaustion
     msg = f"marketplace {name!r}: unknown source kind {src.kind!r}"
     raise ValueError(msg)
@@ -265,13 +314,28 @@ def _codex_marketplace_to_neutral(
             )
         )
         return None
-    if entry.source_type == "local":
+    # Wave-11 F-MP-G/F-MP-U: if the encoder stashed a Chameleon-namespaced
+    # neutral-kind hint, recover the original ``PluginMarketplaceSource``
+    # shape exactly. Without these, ``github`` would collapse to ``git``
+    # (the synthesized HTTPS URL is indistinguishable from a hand-written
+    # one) and ``url`` would also collapse to ``git`` (since the only
+    # remaining signal is the absence of ``source_type``, which a stale
+    # write could erase).
+    if entry.chameleon_kind == "github":
+        neutral_src = PluginMarketplaceSource(
+            kind="github",
+            repo=entry.chameleon_repo,
+            ref=entry.ref,
+        )
+    elif entry.chameleon_kind == "url":
+        neutral_src = PluginMarketplaceSource(kind="url", url=entry.source)
+    elif entry.source_type == "local":
         neutral_src = PluginMarketplaceSource(kind="local", path=entry.source)
     else:
         # source_type == "git" or unset; use ``git`` kind by default — this is
         # how Codex always stores remote marketplaces.
         neutral_src = PluginMarketplaceSource(kind="git", url=entry.source, ref=entry.ref)
-    return PluginMarketplace(source=neutral_src, auto_update=None)
+    return PluginMarketplace(source=neutral_src, auto_update=entry.auto_update)
 
 
 __all__ = ["CodexCapabilitiesCodec", "CodexCapabilitiesSection"]

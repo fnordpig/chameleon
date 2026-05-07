@@ -440,34 +440,34 @@ _XFAIL_ENCODE_SYMMETRY: dict[FieldPath, str] = {
     # and Codex codecs equally drop McpServerStdio.cwd, so the two lanes
     # agree (both recover cwd=None). The bug surfaces under per-lane
     # input round-trip (property 4) and Claude->Codex chain (property 2).
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-G + F-MP-U + F-AU: Codex codec rewrites kind='github' -> 'git', "
-        "kind='url' -> 'git', and drops auto_update without warnings."
-    ),
+    #
+    # Wave-11 F-MP fix (parity/wave11-fmp-codex-marketplace) removed
+    # ``capabilities.plugin_marketplaces`` from this map — the Codex
+    # codec now preserves ``kind='github'`` / ``kind='url'`` and the
+    # ``auto_update`` flag through a Chameleon-namespaced extras
+    # channel on the marketplace entry. See
+    # ``tests/property/test_codex_marketplace_roundtrip.py``.
 }
 
 _XFAIL_DECODE_SYMMETRY: dict[FieldPath, str] = {
     FieldPath(segments=("capabilities", "mcp_servers")): (
         "F-CWD chained: cwd dropped by Claude lane is not restored by Codex lane."
     ),
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-G chained: github -> git collapse propagates through Codex lane."
-    ),
+    # Wave-11 F-MP fix removed ``capabilities.plugin_marketplaces`` —
+    # the github -> git collapse no longer propagates through the
+    # Codex lane.
 }
 
 _XFAIL_IDEMPOTENCE: dict[FieldPath, str] = {
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-U: Codex encoder is non-idempotent for kind='url' marketplaces "
-        "(first round emits source_type=None, decode collapses to 'git', "
-        "second round emits source_type='git')."
-    ),
+    # Wave-11 F-MP fix removed ``capabilities.plugin_marketplaces`` —
+    # the Codex encoder is now idempotent for ``kind='url'``
+    # (``chameleon_kind`` tag survives the round-trip and the second
+    # encode emits the same ``source_type=None``).
 }
 
 _XFAIL_PARTIAL_INPUT: dict[FieldPath, str] = {
     FieldPath(segments=("capabilities", "mcp_servers")): ("F-CWD: see test_encode_symmetry."),
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-G + F-AU: see test_encode_symmetry."
-    ),
+    # Wave-11 F-MP fix removed ``capabilities.plugin_marketplaces``.
 }
 
 
