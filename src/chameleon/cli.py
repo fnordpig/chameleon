@@ -308,12 +308,43 @@ def _cmd_validate(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
+    """Per-target drift summary plus pending-state surfacing.
+
+    Replaces the previous shape (one-liner from a dry-run merge that
+    conveyed nothing useful when clean). The new output gives the
+    operator: neutral file presence, per-target clean/drift state, and
+    counts of any pending notices or unresolved transactions. Exit code
+    is 0 if everything is clean and nothing pending; 1 if any drift OR
+    pending state exists.
+    """
     paths = _resolve_paths(args)
     targets = TargetRegistry.discover()
-    engine = MergeEngine(targets=targets, paths=paths, strategy=Strategy(kind=OnConflict.KEEP))
-    result = engine.merge(MergeRequest(dry_run=True))
-    sys.stdout.write(result.summary + "\n")
-    return 0 if "nothing to do" in result.summary else 1
+
+    sys.stdout.write(f"chameleon {__version__}\n")
+    sys.stdout.write(f"neutral: {paths.neutral}")
+    if not paths.neutral.exists():
+        sys.stdout.write("  (missing — run `chameleon init`)\n")
+    else:
+        sys.stdout.write("  (present)\n")
+
+    any_drift = False
+    for target_id in sorted(targets.target_ids(), key=lambda t: t.value):
+        target_cls = targets.get(target_id)
+        if target_cls is None:
+            continue
+        drift, _diff_text, status = _diff_one_target(target_cls, paths, target_id)
+        sys.stdout.write(f"  {status}\n")
+        if drift:
+            any_drift = True
+
+    notices = NoticeStore(paths.notices_dir).entries()
+    if notices:
+        sys.stdout.write(f"notices: {len(notices)} pending — run `chameleon doctor`\n")
+    pending_tx = TransactionStore(paths.tx_dir).entries()
+    if pending_tx:
+        sys.stdout.write(f"transactions: {len(pending_tx)} unresolved — run `chameleon doctor`\n")
+
+    return 1 if (any_drift or notices or pending_tx) else 0
 
 
 def _stdin_is_a_tty() -> bool:
