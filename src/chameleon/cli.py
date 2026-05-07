@@ -19,9 +19,12 @@ from rich.prompt import Confirm
 
 from chameleon import __version__
 from chameleon._types import FileOwnership, TargetId
+from chameleon.codecs._protocol import TranspileCtx
 from chameleon.io.yaml import dump_yaml, load_yaml
+from chameleon.merge.changeset import walk_changes
 from chameleon.merge.drift import unified_diff
 from chameleon.merge.engine import MergeEngine, MergeRequest, MergeResult
+from chameleon.merge.resolutions import compute_decision_hash, render_change_path
 from chameleon.merge.resolve import (
     InteractiveResolver,
     NonInteractiveResolver,
@@ -31,7 +34,7 @@ from chameleon.merge.resolve import (
     stdin_is_a_tty,
 )
 from chameleon.schema._constants import OnConflict
-from chameleon.schema.neutral import Neutral
+from chameleon.schema.neutral import Neutral, Resolutions
 from chameleon.state.git import GitRepo
 from chameleon.state.locks import partial_owned_write
 from chameleon.state.notices import NoticeStore
@@ -125,6 +128,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p_targets = sub.add_parser("targets", help="target plugin operations")
     _add_common_args(p_targets)
     p_targets.add_argument("op", choices=["list"])
+
+    p_resolutions = sub.add_parser(
+        "resolutions",
+        help="inspect or clear stored conflict resolutions (Wave-15 §4)",
+    )
+    _add_common_args(p_resolutions)
+    p_resolutions.add_argument(
+        "op",
+        choices=["list", "clear"],
+        help="list: show stored resolutions; clear: remove one or all entries",
+    )
+    p_resolutions.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help="(clear only) the resolution path to remove; omit to clear all",
+    )
+    p_resolutions.add_argument(
+        "--yes",
+        action="store_true",
+        help="(clear) skip the interactive confirmation; required off a TTY",
+    )
 
     return parser
 
@@ -590,6 +615,155 @@ def _cmd_discard(args: argparse.Namespace) -> int:  # noqa: PLR0911 — guard ch
     return 0
 
 
+def _classify_resolution_status(  # noqa: PLR0912 — single linear walk over targets+codecs
+    paths: StatePaths,
+    targets: TargetRegistry,
+    n1: Neutral,
+) -> dict[str, str]:
+    """Compute per-resolution hash_status by replaying the change-walker.
+
+    Returns a ``{path_key: status}`` dict where status is one of:
+    ``current`` (the live ChangeRecord's hash matches the stored
+    decision_hash), ``stale`` (the record exists but the hash drifted),
+    or ``missing-record`` (no current ChangeRecord at this path — the
+    disagreement is gone, the GC pass would prune this entry on the
+    next merge).
+
+    Operates against live target files exactly as the merge engine does
+    on disassemble, but never writes anything; safe to run from a
+    listing command.
+    """
+    if not n1.resolutions.items:
+        return {}
+
+    if paths.lkg.exists():
+        n0 = Neutral.model_validate(load_yaml(paths.lkg))
+    else:
+        n0 = Neutral(schema_version=1)
+
+    ctx = TranspileCtx()
+    per_target_neutral: dict[TargetId, Neutral] = {}
+    for tid in targets.target_ids():
+        target_cls = targets.get(tid)
+        if target_cls is None:
+            continue
+        live: dict[str, bytes] = {}
+        for spec in target_cls.assembler.files:
+            live_path = Path(os.path.expanduser(spec.live_path))
+            if live_path.exists():
+                live[spec.repo_path] = live_path.read_bytes()
+        domains, _ = target_cls.assembler.disassemble(live, ctx=ctx)
+        target_neutral = Neutral(schema_version=1)
+        for codec_cls in target_cls.codecs:
+            if codec_cls.domain not in domains:
+                continue
+            try:
+                fragment = codec_cls.from_target(domains[codec_cls.domain], ctx)
+            except NotImplementedError:
+                continue
+            setattr(target_neutral, codec_cls.domain.value, fragment)
+        per_target_neutral[tid] = target_neutral
+
+    records = walk_changes(n0, n1, per_target_neutral)
+    by_path = {render_change_path(r): r for r in records}
+
+    status: dict[str, str] = {}
+    for path_key, resolution in n1.resolutions.items.items():
+        record = by_path.get(path_key)
+        if record is None:
+            status[path_key] = "missing-record"
+            continue
+        if compute_decision_hash(record) == resolution.decision_hash:
+            status[path_key] = "current"
+        else:
+            status[path_key] = "stale"
+    return status
+
+
+def _cmd_resolutions(args: argparse.Namespace) -> int:  # noqa: PLR0911 — guard chain
+    """`chameleon resolutions list|clear` — operator escape hatch (§4)."""
+    paths = _resolve_paths(args)
+    stderr = Console(stderr=True, highlight=False)
+
+    if not paths.neutral.exists():
+        stderr.print(f"[red]error[/]: neutral file not found: {paths.neutral}")
+        return 2
+    n1 = Neutral.model_validate(load_yaml(paths.neutral))
+
+    if args.op == "list":
+        targets = TargetRegistry.discover()
+        status_map = _classify_resolution_status(paths, targets, n1)
+        items = n1.resolutions.items
+        if not items:
+            sys.stdout.write("(no stored resolutions)\n")
+            return 0
+        # Plain-text table — keeps stdout pipe-friendly for tests and
+        # operator scripting. Columns: path | decided_at | decision |
+        # decision_target | hash_status. Width is computed once over the
+        # data so columns line up without truncation.
+        rows: list[tuple[str, str, str, str, str]] = []
+        for path_key, resolution in sorted(items.items()):
+            target_str = (
+                resolution.decision_target.value if resolution.decision_target is not None else "-"
+            )
+            rows.append(
+                (
+                    path_key,
+                    resolution.decided_at.isoformat(),
+                    resolution.decision.value,
+                    target_str,
+                    status_map.get(path_key, "missing-record"),
+                )
+            )
+        headers = ("path", "decided_at", "decision", "decision_target", "hash_status")
+        widths = [max(len(h), *(len(r[i]) for r in rows)) for i, h in enumerate(headers)]
+        fmt = "  ".join(f"{{:<{w}}}" for w in widths)
+        sys.stdout.write(fmt.format(*headers) + "\n")
+        sys.stdout.write(fmt.format(*("-" * w for w in widths)) + "\n")
+        for row in rows:
+            sys.stdout.write(fmt.format(*row) + "\n")
+        return 0
+
+    # op == "clear"
+    items = n1.resolutions.items
+    if not items:
+        sys.stdout.write("(no stored resolutions to clear)\n")
+        return 0
+
+    if args.path is not None:
+        if args.path not in items:
+            stderr.print(
+                f"[red]error[/]: no resolution at {args.path!r}; "
+                f"run `chameleon resolutions list` to see available paths"
+            )
+            return 2
+        prompt = f"clear resolution at {args.path!r}?"
+        targets_to_clear = [args.path]
+    else:
+        prompt = f"clear all {len(items)} stored resolution(s)?"
+        targets_to_clear = list(items.keys())
+
+    if not args.yes:
+        if not _stdin_is_a_tty():
+            stderr.print(
+                "[red]error[/]: refusing to clear resolutions without confirmation off a TTY; "
+                "pass [bold]--yes[/] to confirm non-interactively"
+            )
+            return 2
+        if not _confirm_discard(prompt, console=stderr):
+            stderr.print("[dim]aborted[/]")
+            return 0
+
+    remaining = {k: v for k, v in items.items() if k not in targets_to_clear}
+    n1.resolutions = Resolutions(items=remaining)
+    paths.neutral.write_text(
+        dump_yaml(n1.model_dump(mode="json", exclude_none=False)),
+        encoding="utf-8",
+    )
+    sys.stdout.write(f"cleared {len(targets_to_clear)} resolution(s)\n")
+    return 0
+
+
 _DISPATCH = {
     "init": _cmd_init,
     "merge": _cmd_merge,
@@ -601,6 +775,7 @@ _DISPATCH = {
     "validate": _cmd_validate,
     "doctor": _cmd_doctor,
     "targets": _cmd_targets,
+    "resolutions": _cmd_resolutions,
 }
 
 
