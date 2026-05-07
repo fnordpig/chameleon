@@ -47,8 +47,8 @@ def test_clean_trust_lists_emit_no_atrust_warning() -> None:
     zero A-TRUST LossWarnings, otherwise every well-formed merge would
     spam the operator.
     """
-    model = Governance(
-        trust=Trust(
+    model = Governance.model_construct(
+        trust=Trust.model_construct(
             trusted_paths=["/srv/a", "/srv/b"],
             untrusted_paths=["/srv/c"],
         )
@@ -62,8 +62,8 @@ def test_duplicate_within_trusted_paths_warns() -> None:
     """A path repeated inside ``trusted_paths`` collapses to a single
     wire key — the codec must emit exactly one
     ``Trust.duplicate_paths`` warning naming the offending path."""
-    model = Governance(
-        trust=Trust(trusted_paths=["/srv/a", "/srv/a", "/srv/b"]),
+    model = Governance.model_construct(
+        trust=Trust.model_construct(trusted_paths=["/srv/a", "/srv/a", "/srv/b"]),
     )
     ctx = TranspileCtx()
     CodexGovernanceCodec.to_target(model, ctx)
@@ -78,8 +78,8 @@ def test_duplicate_within_trusted_paths_warns() -> None:
 def test_duplicate_within_untrusted_paths_warns() -> None:
     """Symmetric to the trusted case — an untrusted-side duplicate
     must also surface the collapse, with the path named."""
-    model = Governance(
-        trust=Trust(untrusted_paths=["/srv/x", "/srv/x"]),
+    model = Governance.model_construct(
+        trust=Trust.model_construct(untrusted_paths=["/srv/x", "/srv/x"]),
     )
     ctx = TranspileCtx()
     CodexGovernanceCodec.to_target(model, ctx)
@@ -96,8 +96,10 @@ def test_path_in_both_lists_warns_and_untrusted_wins() -> None:
     of the contract — the warning and the deterministic winner — are
     pinned here so an accidental reorder of the encode loops can't
     silently change the answer."""
-    model = Governance(
-        trust=Trust(trusted_paths=["/srv/conflict"], untrusted_paths=["/srv/conflict"]),
+    model = Governance.model_construct(
+        trust=Trust.model_construct(
+            trusted_paths=["/srv/conflict"], untrusted_paths=["/srv/conflict"]
+        ),
     )
     ctx = TranspileCtx()
     section = CodexGovernanceCodec.to_target(model, ctx)
@@ -115,8 +117,8 @@ def test_duplicate_and_both_emit_distinct_warnings() -> None:
     must emit two distinct ``LossWarning`` instances (one per category)
     so the operator can tell them apart in the merge banner. Collapsing
     them into a single combined warning would hide one axis of loss."""
-    model = Governance(
-        trust=Trust(
+    model = Governance.model_construct(
+        trust=Trust.model_construct(
             trusted_paths=["/srv/a", "/srv/a"],
             untrusted_paths=["/srv/a"],
         ),
@@ -142,8 +144,8 @@ def test_duplicates_across_both_lists_only_warns_once_per_category() -> None:
     one ``Trust.both_trusted_and_untrusted`` warning if the same path
     happens to appear in both — emitting one warning per offending path
     would scale linearly with config size and drown the operator."""
-    model = Governance(
-        trust=Trust(
+    model = Governance.model_construct(
+        trust=Trust.model_construct(
             trusted_paths=["/srv/a", "/srv/a", "/srv/b", "/srv/b"],
             untrusted_paths=["/srv/c", "/srv/c"],
         ),
