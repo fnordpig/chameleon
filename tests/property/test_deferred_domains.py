@@ -12,7 +12,7 @@ from chameleon.codecs.codex.authorization import CodexAuthorizationCodec
 from chameleon.codecs.codex.governance import CodexGovernanceCodec
 from chameleon.codecs.codex.interface import CodexInterfaceCodec
 from chameleon.codecs.codex.lifecycle import CodexLifecycleCodec
-from chameleon.schema.authorization import Authorization, SandboxMode
+from chameleon.schema.authorization import Authorization, PermissionMode, SandboxMode
 from chameleon.schema.governance import Governance, Trust, Updates, UpdatesChannel
 from chameleon.schema.interface import Interface, Voice
 from chameleon.schema.lifecycle import History, HistoryPersistence, Lifecycle
@@ -20,9 +20,12 @@ from chameleon.schema.lifecycle import History, HistoryPersistence, Lifecycle
 # ---- Authorization ----------------------------------------------------------
 
 
-def test_claude_authorization_round_trip_sandbox_mode_filesystem_network() -> None:
+def test_claude_authorization_round_trip_permission_mode_filesystem_network() -> None:
+    # Wave-13 S2: Claude IS the permission_mode axis (LCD lossless side).
+    # ``sandbox_mode`` is now Codex-only — see the LossWarning surface in
+    # ``test_claude_authorization_codec.py``.
     orig = Authorization(
-        sandbox_mode=SandboxMode.WORKSPACE_WRITE,
+        permission_mode=PermissionMode.ACCEPT_EDITS,
         allow_patterns=["Bash(npm run *)"],
         deny_patterns=["Bash(curl *)"],
     )
@@ -31,7 +34,7 @@ def test_claude_authorization_round_trip_sandbox_mode_filesystem_network() -> No
     ctx = TranspileCtx()
     section = ClaudeAuthorizationCodec.to_target(orig, ctx)
     restored = ClaudeAuthorizationCodec.from_target(section, ctx)
-    assert restored.sandbox_mode is SandboxMode.WORKSPACE_WRITE
+    assert restored.permission_mode is PermissionMode.ACCEPT_EDITS
     assert restored.allow_patterns == ["Bash(npm run *)"]
     assert restored.deny_patterns == ["Bash(curl *)"]
     assert restored.filesystem.allow_write == ["/tmp/build"]
