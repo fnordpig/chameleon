@@ -592,13 +592,12 @@ EngineStateMachine.TestCase.settings = _state_machine_settings
 #   runs without spending the shrink budget on a known-broken case.
 # ---------------------------------------------------------------------------
 
-TestEngineStateMachine = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Wave-11 candidate: state-machine fuzz finds a non-idempotent "
-        "merge sequence within ~25 examples on every seed (adversarial "
-        "neutral edit -> merge_twice_idempotent). Most consistent culprit "
-        "is the governance domain's claude/codex codec asymmetry; tracked "
-        "for Wave-11 triage."
-    ),
-)(EngineStateMachine.TestCase)
+# Wave-11 closed the non-idempotency. Three independent fixes combined to
+# flip this xfail to passing:
+#   - W11-1+1b: McpServerStdio.cwd preserved on both sides (parity/wave11-fcwd-*)
+#   - W11-2:    Codex marketplace round-trip preservation via chameleon-namespaced
+#               extras for kind='github'/'url' and auto_update (parity/wave11-fmp-*)
+#   - W11-4:    Trust path canonicalisation at neutral schema construction
+#               (parity/wave11-didem-governance-asymmetry) — the model_validator
+#               eliminates the duplicate-collapse class entirely.
+TestEngineStateMachine = EngineStateMachine.TestCase
