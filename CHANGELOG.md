@@ -9,6 +9,122 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.4.0] — 2026-05-06
+
+This release closes the **last open architectural node** from the
+original parity-gap DAG: P3 — authorization unification. Wave-13
+ships an LCD (lowest-common-denominator) authorization scheme that
+gives every operator on either target lossless coverage of the
+small structurally-common subset of authorization concepts, while
+preserving target-native richness (Claude pattern-language
+permissions, Codex named-profile permissions, granular approval
+discriminated unions) byte-faithfully via the existing Wave-5 / Wave-7
+pass-through infrastructure.
+
+The design call: **chameleon does NOT translate** Claude's
+pattern-language permissions to/from Codex's named-profile
+permissions. The DSL stays where it lives. The LCD scheme handles
+the common case (a `permission_mode` on Claude; a `sandbox_mode` and
+an `approval_policy` on Codex) cleanly; the rich case rides
+pass-through. See `docs/superpowers/specs/2026-05-06-p3-authorization-design.md`
+for the full design exploration.
+
+### Added — LCD authorization scheme
+
+- **`PermissionMode` enum (3 values, Claude-aligned).** `default`,
+  `accept_edits`, `plan`. Claimed losslessly by the Claude
+  authorization codec on the wire path `permissions.defaultMode`
+  (with the schema's camelCase mapping). Bijective round-trip
+  proven by the enum-exhaustion catalog.
+- **`ApprovalPolicy` enum (4 values, Codex-aligned).** `untrusted`,
+  `on_failure`, `on_request`, `never`. Claimed losslessly by the
+  Codex authorization codec, with the correct hyphen-vs-underscore
+  wire handling (`on-failure` / `on-request` on the wire,
+  `on_failure` / `on_request` in neutral). Bijective round-trip
+  proven.
+- **Bijective round-trip on each enum on its claiming target.** The
+  `enum_exhaustion` static catalog automatically picks up the new
+  claimers; the formerly-skipped `permission_mode` (Claude),
+  `sandbox_mode` (Codex), and `approval_policy` (Codex) cases now
+  PASSED.
+- **Typed `LossWarning` instances on cross-target encode.** Authoring
+  `permission_mode` and merging through the Codex codec emits a
+  clear, helpful warning naming the Claude-only nature of the axis
+  (and vice versa for `sandbox_mode` / `approval_policy` going through
+  Claude).
+- **Decode of unmodeled wire values routes to pass-through.** Claude's
+  four unmodeled `defaultMode` values (`auto`, `dontAsk`,
+  `bypassPermissions`, `delegate`) route to
+  `targets.claude.items["permissions"]` with a typed `LossWarning`
+  rather than crashing or silently dropping. Codex's `granular`
+  discriminated-union approval shape routes the same way to
+  `targets.codex.items["approval_policy"]` pass-through with a typed
+  `LossWarning`.
+
+### Changed
+
+- **`DefaultMode` renamed to `SandboxMode`.** The previous name was
+  always Codex-shaped — its 3 values mirror Codex's wire `SandboxMode`
+  enum exactly, including the `danger-full-access` wire mapping for
+  the `FULL_ACCESS` neutral value. The rename is honest. Field on
+  `Authorization` renamed `default_mode` → `sandbox_mode`. Mechanical
+  fix for any neutral-YAML consumer; the enum's semantics and wire
+  representation are unchanged.
+- **LCD design call: no DSL translation.** Chameleon does NOT
+  translate Claude's pattern-language permissions
+  (`Bash(...)`, regex patterns, `autoModeClassifierPrompt`, etc.) to
+  or from Codex's named-profile permissions
+  (`[permissions.<name>]` tables, multi-profile setups). The DSL
+  stays target-native; pass-through carries the rich cases byte-
+  faithfully via the Wave-5/7 pass-through namespace, parametric
+  over target.
+
+### Fixed
+
+- **A-TRUST tests now use `model_construct`.** The W11-3 trust tests
+  called `Trust(...)` directly, but Wave-11's D-IDEM model_validator
+  dedupes path lists at construction — making the codec's
+  `LossWarning` path unreachable through the public constructor.
+  Switching the affected tests to `model_construct` bypasses the
+  validator and lets them exercise the wire-parsed-with-duplicates
+  path the `LossWarning`s actually fire on. Net: 5 previously-failing
+  tests now pass; 0.4.0's CI is green where 0.3.0's was red on those
+  cases.
+
+### Tests
+
+- 130 (0.1.0) → 286 (0.2.0) → 415 (0.3.0) → **463 passing + 35
+  skipped + 70 fuzz (deselected)** at 0.4.0. Verify your local
+  numbers match before tagging a release.
+- **7 new bijection axes proven** — Wave-13's two new enums plus the
+  renamed `SandboxMode`, each on its claiming target.
+- **`enum_exhaustion` static catalog auto-picks-up new claimers.**
+  The formerly-skipped `permission_mode` (Claude side), `sandbox_mode`
+  (Codex side), and `approval_policy` (Codex side) cases now PASSED.
+- **`no-silent-drops` audit unchanged: still 0 silent-drops on both
+  targets.** Codex `claimed 171 → 178`, `pass-through 528 → 521`
+  reflects the prefix-claim covering `approval_policy` plus six
+  fields under the `granular` subtree.
+
+### Known limitations
+
+- **Rich authorization translation is intentionally NOT implemented.**
+  Claude's pattern-language permissions and Codex's named-profile
+  permissions stay target-native. The LCD scheme handles common-case
+  operators cleanly; rich-case operators preserve their target-native
+  shape via `targets.<target>.items["permissions"]` pass-through and
+  do not propagate cross-target.
+- **Granular approval shape (`AskForApproval4` Codex variant)** is
+  preserved byte-faithfully via pass-through but does NOT round-trip
+  cross-target. Operators using Codex's granular discriminated-union
+  approval need to author it Codex-side only.
+- **Claude's auto-mode classifier customization
+  (`autoModeClassifierPrompt` etc.), `dontAsk`, `bypassPermissions`,
+  and `delegate` defaultMode values** pass through but do not
+  propagate to Codex.
+- **Windows still untested.** `fcntl`-based partial-ownership writes
+  remain POSIX-only by design. Unchanged from 0.1.0.
+
 ## [0.3.0] — 2026-05-06
 
 This release closes the V1 → V1+ acceptance gate. The verification
