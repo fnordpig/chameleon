@@ -1,7 +1,12 @@
 """Codex codec for the authorization domain.
 
-V0 thin slice:
-  default_mode                ↔ sandbox_mode
+V0 thin slice (Wave-13 S1 schema rename — codec body is unchanged
+mechanically because we only renamed the type, not its values; S3 will
+rewrite this codec to consume the LCD schema's new ``approval_policy``
+field and to route Codex's named ``[permissions.<name>]`` profiles
+through ``targets.codex.items["permissions"]`` pass-through):
+
+  sandbox_mode                ↔ sandbox_mode
   filesystem.allow_write      ↔ [sandbox_workspace_write].writable_roots
   reviewer (P1-G)             ↔ approvals_reviewer
 """
@@ -18,20 +23,20 @@ from chameleon.codecs.codex._generated import ApprovalsReviewer
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.authorization import (
     Authorization,
-    DefaultMode,
     FilesystemPolicy,
     Reviewer,
+    SandboxMode,
 )
 
-_DEFAULT_MODE_TO_CODEX: dict[DefaultMode, str] = {
-    DefaultMode.READ_ONLY: "read-only",
-    DefaultMode.WORKSPACE_WRITE: "workspace-write",
-    DefaultMode.FULL_ACCESS: "danger-full-access",
+_SANDBOX_MODE_TO_CODEX: dict[SandboxMode, str] = {
+    SandboxMode.READ_ONLY: "read-only",
+    SandboxMode.WORKSPACE_WRITE: "workspace-write",
+    SandboxMode.FULL_ACCESS: "danger-full-access",
 }
-_CODEX_TO_DEFAULT_MODE: dict[str, DefaultMode] = {
-    "read-only": DefaultMode.READ_ONLY,
-    "workspace-write": DefaultMode.WORKSPACE_WRITE,
-    "danger-full-access": DefaultMode.FULL_ACCESS,
+_CODEX_TO_SANDBOX_MODE: dict[str, SandboxMode] = {
+    "read-only": SandboxMode.READ_ONLY,
+    "workspace-write": SandboxMode.WORKSPACE_WRITE,
+    "danger-full-access": SandboxMode.FULL_ACCESS,
 }
 
 # P1-G — neutral ``authorization.reviewer`` <-> Codex ``approvals_reviewer``.
@@ -84,8 +89,8 @@ class CodexAuthorizationCodec:
     @staticmethod
     def to_target(model: Authorization, ctx: TranspileCtx) -> CodexAuthorizationSection:
         section = CodexAuthorizationSection()
-        if model.default_mode is not None:
-            section.sandbox_mode = _DEFAULT_MODE_TO_CODEX[model.default_mode]
+        if model.sandbox_mode is not None:
+            section.sandbox_mode = _SANDBOX_MODE_TO_CODEX[model.sandbox_mode]
         section.sandbox_workspace_write.writable_roots = list(model.filesystem.allow_write)
         if model.reviewer is not None:
             section.approvals_reviewer = _REVIEWER_TO_CODEX[model.reviewer].value
@@ -134,9 +139,9 @@ class CodexAuthorizationCodec:
     def from_target(section: CodexAuthorizationSection, ctx: TranspileCtx) -> Authorization:
         auth = Authorization()
         if section.sandbox_mode is not None:
-            mapped = _CODEX_TO_DEFAULT_MODE.get(section.sandbox_mode)
+            mapped = _CODEX_TO_SANDBOX_MODE.get(section.sandbox_mode)
             if mapped is not None:
-                auth.default_mode = mapped
+                auth.sandbox_mode = mapped
             else:
                 ctx.warn(
                     LossWarning(
