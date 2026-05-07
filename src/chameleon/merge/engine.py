@@ -28,13 +28,29 @@ from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge._diffs import FileDiff
 from chameleon.merge.changeset import (
     ChangeOutcome,
+    ChangeRecord,
+    _serialize,
     classify_change,
     walk_changes,
 )
 from chameleon.merge.conflict import Conflict
-from chameleon.merge.resolve import NonInteractiveResolver, Resolver, Strategy
+from chameleon.merge.resolutions import (
+    compute_decision_hash,
+    parse_resolution_key,
+    render_change_path,
+)
+from chameleon.merge.resolve import (
+    NonInteractiveResolver,
+    Resolver,
+    Strategy,
+)
 from chameleon.schema._constants import Domains
-from chameleon.schema.neutral import Neutral
+from chameleon.schema.neutral import (
+    Neutral,
+    Resolution,
+    ResolutionDecisionKind,
+    Resolutions,
+)
 from chameleon.schema.passthrough import PassThroughBag
 from chameleon.state.git import GitRepo
 from chameleon.state.paths import StatePaths
@@ -244,6 +260,172 @@ def _write_leaf(
         setattr(parent, leaf_name, current)
 
 
+def _resolved_value_from_resolution(
+    resolution: Resolution,
+    record: ChangeRecord,
+    per_target_neutral: dict[TargetId, Neutral],
+) -> object:
+    """Compute the leaf value to apply when replaying a non-TARGET_SPECIFIC decision.
+
+    Mirrors what the resolver would have returned for the same decision
+    kind, but reads in-Python values from ``per_target_neutral`` /
+    ``record`` rather than re-running the resolver. ``TARGET_SPECIFIC``
+    is handled by ``_apply_target_specific`` instead. ``SKIP`` is never
+    replayed (the engine bypasses this helper for SKIP).
+    """
+    kind = resolution.decision
+    if kind is ResolutionDecisionKind.TAKE_NEUTRAL:
+        return record.n1
+    if kind is ResolutionDecisionKind.TAKE_LKG:
+        return record.n0
+    if kind is ResolutionDecisionKind.TAKE_TARGET:
+        tid = resolution.decision_target
+        if tid is None:
+            msg = (
+                f"resolution at {record.render_path()!r} declares TAKE_TARGET "
+                "but no decision_target is set"
+            )
+            raise ValueError(msg)
+        # Pull the in-Python leaf out of the target's neutral so Pydantic
+        # types (Enums, nested models) survive into the write step.
+        return _read_leaf(
+            per_target_neutral[tid],
+            record.path.segments,
+            record.target_key,
+            record.dict_key,
+        )
+    msg = f"cannot replay resolution kind {kind!r} via _resolved_value_from_resolution"
+    raise ValueError(msg)
+
+
+def _apply_target_specific(
+    record: ChangeRecord,
+    composed: Neutral,
+    per_target_overlay: dict[TargetId, Neutral],
+    per_target_neutral: dict[TargetId, Neutral],
+) -> None:
+    """Plumb a TARGET_SPECIFIC resolution through composed + overlays.
+
+    Per resolution-memory spec §2.1 + §2.2: for a TARGET_SPECIFIC
+    decision, harvest each target's current per-target value into
+    ``composed.targets[tid].target_specific[<path>]`` (so it survives
+    into next merge), and patch each target's overlay at the unified
+    path so its codec sees the target-namespaced value while the unified
+    composed path stays unset.
+
+    The unified leaf in ``composed`` is left at whatever ``n1`` carried
+    (typically the schema default for an unauthored leaf). Each target's
+    overlay receives just that target's own per-target value — never any
+    other target's — so cross-target propagation is genuinely disabled.
+    """
+    path_str = render_change_path(record)
+    for tid, value in record.per_target.items():
+        # Persist into composed.targets[tid].target_specific so the
+        # operator and the next merge can see what we recorded.
+        existing_bag = composed.targets.get(tid, PassThroughBag())
+        ts = dict(existing_bag.target_specific)
+        ts[path_str] = value
+        composed.targets[tid] = PassThroughBag.model_validate(
+            {"items": existing_bag.items, "target_specific": ts}
+        )
+        # Patch this target's overlay so its codec sees the target-
+        # namespaced value at the unified slot.
+        if tid in per_target_overlay:
+            # Use the in-Python value from per_target_neutral (preserves
+            # Pydantic types) rather than the JSON-serialized form on
+            # ``record.per_target``.
+            live_leaf = _read_leaf(
+                per_target_neutral[tid],
+                record.path.segments,
+                record.target_key,
+                record.dict_key,
+            )
+            if live_leaf is None:
+                # Fall back to the serialized record value when the
+                # in-Python leaf isn't available (defensive — record-only
+                # callsites such as resolution replay).
+                live_leaf = value
+            _write_leaf(
+                per_target_overlay[tid],
+                record.path.segments,
+                record.target_key,
+                live_leaf,
+                record.dict_key,
+            )
+
+
+def _apply_resolution_value(
+    outcome_value: object,
+    record: ChangeRecord,
+    composed: Neutral,
+    per_target_overlay: dict[TargetId, Neutral],
+) -> None:
+    """Write a single resolved value to composed + every per-target overlay."""
+    _write_leaf(
+        composed,
+        record.path.segments,
+        record.target_key,
+        outcome_value,
+        record.dict_key,
+    )
+    for overlay in per_target_overlay.values():
+        _write_leaf(
+            overlay,
+            record.path.segments,
+            record.target_key,
+            outcome_value,
+            record.dict_key,
+        )
+
+
+def _gc_resolutions(composed: Neutral, per_target_neutral: dict[TargetId, Neutral]) -> None:
+    """Prune stored resolutions whose disagreement has resolved itself.
+
+    Walks ``composed.resolutions.items`` and removes entries where the
+    unified neutral value at the path now equals every per-target value
+    (i.e. there is no current cross-target disagreement). Per spec §1
+    "GC" — runs only on successful merges; failed merges leave entries
+    intact so the operator can retry.
+
+    TARGET_SPECIFIC entries are GC'd when the per-target values have
+    converged with each other AND with the unified path; otherwise the
+    operator's "preserve separately" intent remains active.
+    """
+    if not composed.resolutions.items:
+        return
+    survivors: dict[str, Resolution] = {}
+    for path_str, resolution in composed.resolutions.items.items():
+        try:
+            parsed = parse_resolution_key(path_str)
+        except ValueError:
+            # Malformed key — preserve rather than silently drop.
+            survivors[path_str] = resolution
+            continue
+        unified_leaf = _read_leaf(
+            composed,
+            parsed.path.segments,
+            parsed.target_key,
+            parsed.dict_key,
+        )
+        unified_serialized = _serialize(unified_leaf)
+        all_match = True
+        for tn in per_target_neutral.values():
+            target_leaf = _read_leaf(
+                tn,
+                parsed.path.segments,
+                parsed.target_key,
+                parsed.dict_key,
+            )
+            if _serialize(target_leaf) != unified_serialized:
+                all_match = False
+                break
+        if all_match:
+            # Disagreement is gone — drop the entry.
+            continue
+        survivors[path_str] = resolution
+    composed.resolutions = Resolutions(items=survivors)
+
+
 class MergeRequest(BaseModel):
     """Inputs to a merge run beyond what the engine already knows."""
 
@@ -401,6 +583,19 @@ class MergeEngine:
         }
 
         records = walk_changes(n0, n1, per_target_neutral, n1_authored=n1_raw)
+        # Resolution-memory bookkeeping (Wave-15 §1).
+        #
+        # ``existing_resolutions`` is a snapshot of the persisted decisions
+        # at the start of this merge — we look entries up by the same
+        # ``render_path()`` key the walker emits. ``new_resolutions``
+        # accumulates outcomes the resolver returns with ``persist=True``
+        # during this run; we copy ``existing_resolutions`` into it (less
+        # any auto-applied entries that no longer match) and write the
+        # union back into ``composed`` at the end. The non-interactive
+        # ``persist=False`` rule from spec §3 means batch strategies leave
+        # the dict untouched.
+        existing_resolutions: dict[str, Resolution] = dict(n1.resolutions.items)
+        new_resolutions: dict[str, Resolution] = dict(existing_resolutions)
         for rec in records:
             cl = classify_change(rec)
             if cl.outcome is ChangeOutcome.UNCHANGED:
@@ -430,7 +625,55 @@ class MergeEngine:
                         )
                 continue
             if cl.outcome is ChangeOutcome.CONFLICT:
-                conflicts.append(Conflict(record=rec))
+                # Resolution-memory lookup (Wave-15 §1).
+                #
+                # Before queueing a CONFLICT for the resolver, check
+                # whether the operator has already decided the same
+                # disagreement. If the stored decision's hash matches
+                # the current record's hash, apply silently. If the hash
+                # has drifted, surface the prior decision on the
+                # ``Conflict`` so an interactive resolver (W15-B) can
+                # render it as a default. ``SKIP`` decisions never
+                # auto-apply per spec §1.
+                rec_path_str = render_change_path(rec)
+                prior = existing_resolutions.get(rec_path_str)
+                if prior is not None:
+                    rec_hash = compute_decision_hash(rec)
+                    if prior.decision_hash == rec_hash:
+                        if prior.decision is ResolutionDecisionKind.SKIP:
+                            # SKIP is intentionally non-replaying (§1):
+                            # the operator left it unresolved last time
+                            # and we don't change that decision silently.
+                            # Fall through to the per-target preservation
+                            # branch below — the resolver will be invoked
+                            # again next time too.
+                            pass
+                        elif prior.decision is ResolutionDecisionKind.TARGET_SPECIFIC:
+                            _apply_target_specific(
+                                rec, composed, per_target_overlay, per_target_neutral
+                            )
+                            ctx.warn(
+                                LossWarning(
+                                    domain=rec.domain,
+                                    target=next(iter(rec.per_target.keys())),
+                                    message=(
+                                        f"{rec.render_path()}: target-specific by operator "
+                                        f"decision; not propagating cross-target"
+                                    ),
+                                    field_path=rec.path,
+                                )
+                            )
+                            continue
+                        else:
+                            replay_value = _resolved_value_from_resolution(
+                                prior, rec, per_target_neutral
+                            )
+                            _apply_resolution_value(replay_value, rec, composed, per_target_overlay)
+                            continue
+                # Either no stored decision or hash drifted — queue the
+                # conflict, attaching the prior decision when present so
+                # an interactive resolver can render it.
+                conflicts.append(Conflict(record=rec, prior_decision=prior))
                 # Per-target preservation: when neither N₀ nor N₁ has an
                 # opinion on this key (both empty / unauthored) but two
                 # or more targets disagree, write each target's own value
@@ -471,31 +714,49 @@ class MergeEngine:
             # carries the value via the n1 deep-copy; nothing to do.
 
         # 6. Resolve conflicts via the configured resolver. The resolver
-        # returns the chosen leaf value (or None to skip); we apply it
-        # at the same path/target_key. Pydantic models in resolved
-        # values pass through `_write_leaf` as-is.
+        # returns a typed ``ResolverOutcome`` carrying the decision kind,
+        # resolved value, and a ``persist`` flag. Outcomes with
+        # ``persist=True`` (interactive resolutions) get written back
+        # into ``composed.resolutions`` so the next merge can replay
+        # them silently. Non-interactive strategies set ``persist=False``
+        # (resolution-memory spec §3) so batch one-shot runs don't
+        # mutate persisted state.
         for c in conflicts:
-            resolved = self._resolver.resolve(c)
-            if resolved is None:
-                continue
-            _write_leaf(
-                composed,
-                c.record.path.segments,
-                c.record.target_key,
-                resolved,
-                c.record.dict_key,
-            )
-            # An explicit resolution overrides per-target preservation —
-            # the operator (or strategy) made a choice, propagate it
-            # everywhere.
-            for overlay in per_target_overlay.values():
-                _write_leaf(
-                    overlay,
-                    c.record.path.segments,
-                    c.record.target_key,
-                    resolved,
-                    c.record.dict_key,
+            outcome = self._resolver.resolve(c)
+            rec_path_str = render_change_path(c.record)
+            if outcome.decision is ResolutionDecisionKind.TARGET_SPECIFIC:
+                _apply_target_specific(c.record, composed, per_target_overlay, per_target_neutral)
+                ctx.warn(
+                    LossWarning(
+                        domain=c.record.domain,
+                        target=next(iter(c.record.per_target.keys())),
+                        message=(
+                            f"{c.record.render_path()}: target-specific by operator "
+                            f"decision; not propagating cross-target"
+                        ),
+                        field_path=c.record.path,
+                    )
                 )
+            elif outcome.decision is ResolutionDecisionKind.SKIP:
+                # Skip leaves composed unchanged at this path — fall
+                # through to the persistence step below so the operator's
+                # explicit "skip" can still be remembered (won't auto-
+                # apply, but the prior_decision context is preserved).
+                pass
+            else:
+                _apply_resolution_value(outcome.value, c.record, composed, per_target_overlay)
+            if outcome.persist:
+                new_resolutions[rec_path_str] = Resolution(
+                    decided_at=datetime.now(tz=UTC),
+                    decision=outcome.decision,
+                    decision_target=outcome.decision_target,
+                    decision_hash=compute_decision_hash(c.record),
+                )
+
+        # Write the (possibly-augmented) resolutions back into composed.
+        # Only persisted entries appear; non-interactive strategies leave
+        # the dict untouched.
+        composed.resolutions = Resolutions(items=new_resolutions)
 
         # 6b. Compose pass-through bags per target.
         #
@@ -514,7 +775,17 @@ class MergeEngine:
             # PassThroughBag.items is `dict[str, JsonValue]`; rely on
             # Pydantic to validate-and-coerce the merged dict (e.g. nested
             # tomlkit Table values normalize to plain dict at this hop).
-            composed.targets[tid] = PassThroughBag.model_validate({"items": merged_items})
+            # Preserve any ``target_specific`` entries already on the bag —
+            # the resolution-memory plumb (Wave-15 §2.2) writes per-target
+            # values into ``existing_bag.target_specific`` *before* this
+            # composition step; rebuilding the bag from ``items`` only
+            # would silently drop them.
+            composed.targets[tid] = PassThroughBag.model_validate(
+                {
+                    "items": merged_items,
+                    "target_specific": dict(existing_bag.target_specific),
+                }
+            )
 
         # 7. Re-derive each target from `composed`
         ctx2 = TranspileCtx(profile_name=request.profile_name)
@@ -606,6 +877,15 @@ class MergeEngine:
                 warnings=all_warnings,
                 diffs=diffs,
             )
+
+        # 7a. GC stale resolutions (Wave-15 §1).
+        #
+        # Walk ``composed.resolutions.items`` and prune entries whose
+        # disagreement has resolved itself (the unified neutral leaf
+        # equals every per-target leaf). Per spec §1 GC: runs only on
+        # successful merges; failed merges (the dry-run early-return
+        # above) leave entries intact so the operator can retry.
+        _gc_resolutions(composed, per_target_neutral)
 
         # 7b. Recovery marker (§4.6).
         #

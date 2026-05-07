@@ -152,11 +152,11 @@ def _drive_engine_loop(
     """
     written: dict[str, object] = {}
     for c in conflicts:
-        resolved = resolver.resolve(c)
-        # Mirror engine.py: ``if resolved is None: continue``. We record
-        # the sentinel ``None`` rather than dropping the entry entirely
-        # so the test can still observe which paths were prompted on.
-        written[c.record.render_path()] = resolved
+        outcome = resolver.resolve(c)
+        # Mirror engine.py: skip outcomes leave composed unchanged. We
+        # record the resolved leaf value (``None`` for SKIP) so the test
+        # can still observe which paths were prompted on.
+        written[c.record.render_path()] = outcome.value
     return written
 
 

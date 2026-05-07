@@ -11,6 +11,7 @@ from chameleon.merge.resolve import (
     on_conflict_to_strategy,
 )
 from chameleon.schema._constants import BUILTIN_CLAUDE, BUILTIN_CODEX, Domains, OnConflict
+from chameleon.schema.neutral import ResolutionDecisionKind
 
 
 def _conflict() -> Conflict:
@@ -36,19 +37,29 @@ def test_strategy_fail_raises() -> None:
 
 def test_strategy_keep_returns_none() -> None:
     resolver = NonInteractiveResolver(Strategy(kind=OnConflict.KEEP))
-    assert resolver.resolve(_conflict()) is None
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value is None
+    assert outcome.decision is ResolutionDecisionKind.SKIP
+    assert outcome.persist is False
 
 
 def test_strategy_prefer_neutral_returns_n1() -> None:
     resolver = NonInteractiveResolver(Strategy(kind=OnConflict.PREFER_NEUTRAL))
-    assert resolver.resolve(_conflict()) == "claude-sonnet-4-7"
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value == "claude-sonnet-4-7"
+    assert outcome.decision is ResolutionDecisionKind.TAKE_NEUTRAL
+    assert outcome.persist is False
 
 
 def test_strategy_prefer_target_returns_target_value() -> None:
     resolver = NonInteractiveResolver(
         Strategy(kind=OnConflict.PREFER_TARGET, target=BUILTIN_CLAUDE),
     )
-    assert resolver.resolve(_conflict()) == "claude-opus-4-7"
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value == "claude-opus-4-7"
+    assert outcome.decision is ResolutionDecisionKind.TAKE_TARGET
+    assert outcome.decision_target == BUILTIN_CLAUDE
+    assert outcome.persist is False
 
 
 def test_on_conflict_to_strategy_parsing() -> None:

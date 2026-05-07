@@ -50,8 +50,9 @@ def test_interactive_resolver_take_neutral(monkeypatch: pytest.MonkeyPatch) -> N
     captured: list[list[str]] = []
     _patch_prompt(monkeypatch, answer="n", captured_choices=captured)
     resolver = InteractiveResolver(console=_quiet_console())
-    result = resolver.resolve(_conflict())
-    assert result == "claude-sonnet-4-7"
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value == "claude-sonnet-4-7"
+    assert outcome.persist is True
     assert captured
     assert "n" in captured[0]
     assert "k" in captured[0]
@@ -61,17 +62,20 @@ def test_interactive_resolver_take_neutral(monkeypatch: pytest.MonkeyPatch) -> N
 def test_interactive_resolver_skip(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_prompt(monkeypatch, answer="s")
     resolver = InteractiveResolver(console=_quiet_console())
-    assert resolver.resolve(_conflict()) is None
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value is None
 
 
 def test_interactive_resolver_revert_to_lkg(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_prompt(monkeypatch, answer="k")
     resolver = InteractiveResolver(console=_quiet_console())
-    assert resolver.resolve(_conflict()) == "claude-sonnet-4-6"
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value == "claude-sonnet-4-6"
 
 
 def test_interactive_resolver_pick_first_target(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_prompt(monkeypatch, answer="a")
     resolver = InteractiveResolver(console=_quiet_console())
     # Insertion order: per_target dict has claude first → letter `a`.
-    assert resolver.resolve(_conflict()) == "claude-opus-4-7"
+    outcome = resolver.resolve(_conflict())
+    assert outcome.value == "claude-opus-4-7"
