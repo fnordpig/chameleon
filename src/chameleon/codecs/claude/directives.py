@@ -188,7 +188,7 @@ class ClaudeDirectivesCodec:
             # deprecated/community bool aliases.
             section.attribution = ClaudeAttribution(commit=model.commit_attribution)
         if model.personality is not None:
-            # P1-E — Claude has no personality concept. Drop the value
+            # Claude has no personality concept. Drop the value
             # rather than guess a Claude-side approximation, but surface
             # the loss as a typed warning so the operator (or a higher
             # layer) can see what was discarded and why.
@@ -197,7 +197,7 @@ class ClaudeDirectivesCodec:
                     domain=Domains.DIRECTIVES,
                     target=BUILTIN_CLAUDE,
                     message=(
-                        "P1-E: directives.personality "
+                        "directives.personality "
                         f"({model.personality.value!r}) has no Claude equivalent; "
                         "dropping during to_target. The value is preserved in "
                         "neutral and will continue to round-trip through the "
@@ -207,7 +207,7 @@ class ClaudeDirectivesCodec:
                 ),
             )
         if model.verbosity is not None:
-            # Wave-10 §15.x — Claude has no top-level ``verbosity`` setting.
+            # Claude has no top-level ``verbosity`` setting.
             # The closest analogue is the runtime ``/verbosity`` slash command,
             # which doesn't persist to settings.json. Surface the drop as a
             # typed warning rather than guess. The value continues to

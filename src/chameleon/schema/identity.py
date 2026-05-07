@@ -1,10 +1,10 @@
 """identity domain — what model, where it's called, how it's authenticated.
 
-Per §7 of the design spec, this domain owns model selection, provider/
+Per, this domain owns model selection, provider/
 endpoint configuration, authentication method, reasoning-effort and
 thinking flags, service tier, and context-window controls. Some keys
 (model, endpoint.base_url) are inherently target-specific; those use
-the `Mapping[TargetId, V]` pattern from §7.1. Target-shared keys
+the `Mapping[TargetId, V]` pattern from. Target-shared keys
 (reasoning_effort, thinking) remain scalar.
 """
 
@@ -31,10 +31,10 @@ class ReasoningEffort(Enum):
 class AuthMethod(Enum):
     """How Chameleon expects the operator to authenticate to the target.
 
-    Wave-11 §15.x reconciliation: this enum was originally six values
+     reconciliation: this enum was originally six values
     (OAUTH/API_KEY/BEDROCK/VERTEX/AZURE/NONE) on the assumption that
     Chameleon would model multi-cloud provider lanes as an auth-method
-    axis. Inspection of both upstream wire schemas at Wave-10 disproved
+    axis. Inspection of both upstream wire schemas at  disproved
     that:
 
     * Claude's ``ForceLoginMethod`` (``_generated.py``) is a 2-element
@@ -56,7 +56,7 @@ class AuthMethod(Enum):
     Carrying ``BEDROCK`` / ``VERTEX`` / ``AZURE`` here meant every
     operator who set them got two LossWarnings (one per target) and
     no observable behaviour change — pure cargo-cult. They are
-    removed in Wave-11 §15.x reconciliation; provider-lane selection
+    removed in  reconciliation; provider-lane selection
     lives where it actually has wire reality (env vars).
     """
 
@@ -102,7 +102,7 @@ class Identity(BaseModel):
     thinking: bool | None = None
     service_tier: str | None = None
     context_window: int | None = Field(default=None, ge=1)
-    # P1-F — Codex-only identity tuning knobs (Claude has no analogue).
+    # Codex-only identity tuning knobs (Claude has no analogue).
     # Wire-name mapping (documented here, applied in CodexIdentityCodec):
     #   compact_threshold   -> model_auto_compact_token_limit
     #   model_catalog_path  -> model_catalog_json
@@ -117,7 +117,7 @@ class Identity(BaseModel):
         description=(
             "Target-specific model identifier. Must be a mapping "
             "TargetId -> model name (e.g. {claude: 'claude-sonnet-4-7'}); "
-            "scalar values are rejected (§7.1)."
+            "scalar values are rejected."
         ),
     )
     endpoint: IdentityEndpoint = Field(default_factory=IdentityEndpoint)

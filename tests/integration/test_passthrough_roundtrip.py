@@ -92,7 +92,7 @@ def test_passthrough_survives_deleted_live_file(
     paths = _setup_env(monkeypatch, tmp_path)
 
     # Pre-seed a live ~/.claude/settings.json with a key Chameleon doesn't
-    # claim. Wave-3 closed the last unclaimed real-world Claude key (voice
+    # claim.  closed the last unclaimed real-world Claude key (voice
     # → P1-C); use a synthetic key that's definitely not claimed by any
     # codec. The pass-through bag is the explicit escape hatch for keys
     # that don't have a neutral concept yet — exactly the use-case here.

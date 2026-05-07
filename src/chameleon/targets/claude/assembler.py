@@ -74,7 +74,7 @@ class ClaudeAssembler:
 
         identity = per_domain.get(Domains.IDENTITY)
         if isinstance(identity, ClaudeIdentitySection):
-            # ``by_alias=True`` is needed for the Wave-10 §15.x fields
+            # ``by_alias=True`` is needed for the  fields
             # (``forceLoginMethod``, ``apiKeyHelper``) which carry the
             # upstream wire name as a Pydantic alias. Existing fields
             # without an alias (``model``, ``effortLevel``,
@@ -202,7 +202,7 @@ class ClaudeAssembler:
             "model",
             "effortLevel",
             "alwaysThinkingEnabled",
-            # Wave-10 §15.x — auth.method ↔ forceLoginMethod, plus
+            # auth.method ↔ forceLoginMethod, plus
             # auth.api_key_helper ↔ apiKeyHelper. Both live in settings.json
             # at top level and are claimed by ClaudeIdentityCodec.
             "forceLoginMethod",

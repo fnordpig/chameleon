@@ -1,4 +1,4 @@
-"""Pass-through namespace for target-unique features (§7.2).
+"""Pass-through namespace for target-unique features.
 
 A `PassThroughBag` is parametric over the target's generated model.
 At the schema layer, the bag's items are typed as `JsonValue` (recursive),
@@ -14,7 +14,7 @@ simple and avoids forcing operators to namespace pass-through values by
 their target's model class name.
 
 In addition to the wire-shaped ``items`` bag, each per-target slot also
-carries a ``target_specific`` mapping (§2.2 of the resolution-memory
+carries a ``target_specific`` mapping ( of the resolution-memory
 spec) keyed by ``FieldPath.render()`` strings. ``items`` is for
 pass-through of fields the schema doesn't model at all; ``target_specific``
 is for fields the schema DOES model where the operator has explicitly

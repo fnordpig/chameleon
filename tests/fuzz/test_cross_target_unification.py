@@ -45,7 +45,7 @@ legitimately differ in spelling between targets (``effortLevel`` vs.
 ``Identity(reasoning_effort=HIGH)`` through one lane and
 ``Identity(reasoning_effort=MEDIUM)`` through the other.
 
-Found divergences are HIGH-priority Wave-11 findings — DO NOT fix
+Found divergences are HIGH-priority  findings — DO NOT fix
 codec code in this branch; report them up to the parent agent so the
 user (whose primary concern this is) sees them as the test result.
 """
@@ -92,9 +92,9 @@ pytestmark = pytest.mark.fuzz
 # user named as their primary concern: "valid settings files that fail
 # to correctly transpile to the other dialect".
 #
-# F-CWD  | capabilities.mcp_servers | RESOLVED in Wave-11 by the paired
-#        | branches parity/wave11-fcwd-claude-mcp-cwd (Claude side) and
-#        | parity/wave11-fcwd-codex-mcp-cwd (Codex side). Both
+# F-CWD  | capabilities.mcp_servers | RESOLVED in  by the paired
+#        | branches  (Claude side) and
+#        |  (Codex side). Both
 #        | `_ClaudeMcpServerStdio` and `_CodexMcpServerStdio` now carry
 #        | `cwd: str | None` and thread it through to_target/from_target.
 #        | Original symptom: the neutral schema models cwd as a first-
@@ -134,8 +134,8 @@ pytestmark = pytest.mark.fuzz
 #
 # These findings are EXACTLY the bug class FUZZ-3 was commissioned to
 # surface. Per the task spec, this branch does NOT fix them — codec
-# repair is Wave-11's lane. The xfail markers below are STRICT so that
-# Wave-11's fixes land observable: the test goes red the moment a fix
+# repair is 's lane. The xfail markers below are STRICT so that
+# 's fixes land observable: the test goes red the moment a fix
 # turns the xfail into an xpass.
 # ----------------------------------------------------------------------
 
@@ -432,49 +432,49 @@ _SHARED_PATHS = strats.cross_target_shared_paths()
 # Per-property xfail tables — one per property because different paths
 # fail different properties (cwd loss fires on encode-symmetry and
 # chain-symmetry but not idempotence; auto_update loss fires only on
-# the partial-input lane check). Strict xfail so Wave-11's fixes flip
+# the partial-input lane check). Strict xfail so 's fixes flip
 # the test red and we notice the moment the bug is gone.
 # ----------------------------------------------------------------------
 
 _XFAIL_ENCODE_SYMMETRY: dict[FieldPath, str] = {
-    # Wave-11 retired both former entries on this map:
+    #  retired both former entries on this map:
     # - F-CWD never manifested under encode-symmetry (both lanes
-    #   equally dropped McpServerStdio.cwd; after parity/wave11-fcwd-*
+    #   equally dropped McpServerStdio.cwd; after *
     #   both equally preserve, still symmetric).
-    # - F-MP fix (parity/wave11-fmp-codex-marketplace) removed
+    # - F-MP fix removed
     #   capabilities.plugin_marketplaces — the Codex codec preserves
     #   kind='github'/'url' and auto_update via Chameleon-namespaced
     #   extras. See tests/property/test_codex_marketplace_roundtrip.py.
 }
 
 _XFAIL_DECODE_SYMMETRY: dict[FieldPath, str] = {
-    # Wave-11 retired both former entries on this map:
-    # - F-CWD on capabilities.mcp_servers (parity/wave11-fcwd-*):
+    #  retired both former entries on this map:
+    # - F-CWD on capabilities.mcp_servers:
     #   both _ClaudeMcpServerStdio and _CodexMcpServerStdio now carry
     #   cwd, so the chained property holds.
     # - F-MP-G on capabilities.plugin_marketplaces
-    #   (parity/wave11-fmp-codex-marketplace): the github -> git
+    #  : the github -> git
     #   collapse no longer propagates through the Codex lane.
 }
 
 _XFAIL_IDEMPOTENCE: dict[FieldPath, str] = {
-    # Wave-11 F-MP fix removed ``capabilities.plugin_marketplaces`` —
+    #  F-MP fix removed ``capabilities.plugin_marketplaces`` —
     # the Codex encoder is now idempotent for ``kind='url'``
     # (``chameleon_kind`` tag survives the round-trip and the second
     # encode emits the same ``source_type=None``).
 }
 
 _XFAIL_PARTIAL_INPUT: dict[FieldPath, str] = {
-    # Wave-11 retired both former entries on this map:
-    # - F-CWD on capabilities.mcp_servers (parity/wave11-fcwd-*).
+    #  retired both former entries on this map:
+    # - F-CWD on capabilities.mcp_servers.
     # - F-MP-G + F-AU on capabilities.plugin_marketplaces
-    #   (parity/wave11-fmp-codex-marketplace).
+    #  .
 }
 
 
 def _params_with_xfail(paths: list[FieldPath], xfail_map: dict[FieldPath, str]) -> list[Any]:
     """Build a parametrize-friendly list, applying strict xfail to the
-    paths in ``xfail_map`` with the documented Wave-11 reason.
+    paths in ``xfail_map`` with the documented  reason.
     """
     out: list[Any] = []
     for p in paths:

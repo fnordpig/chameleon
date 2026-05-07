@@ -1,4 +1,4 @@
-"""P1-F: Codex-only identity tuning knobs.
+"""Codex-only identity tuning knobs.
 
 The Codex exemplar at tests/fixtures/exemplar/home/_codex/config.toml has
 three top-level identity tuning keys that Claude has no analogue for:
@@ -14,6 +14,7 @@ must emit a LossWarning naming P1-F when neutral has any of these set.
 
 from __future__ import annotations
 
+import pytest
 import tomlkit
 
 from chameleon.codecs._protocol import TranspileCtx
@@ -50,6 +51,14 @@ def test_round_trip_model_catalog_path() -> None:
     assert section.model_catalog_json == path
     restored = CodexIdentityCodec.from_target(section, ctx)
     assert restored.model_catalog_path == path
+
+
+def test_model_catalog_path_expands_user_home(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", "/Users/exampleuser")
+    orig = Identity(model_catalog_path="~/.codex/model-catalog-600k.json")
+    ctx = TranspileCtx()
+    section = CodexIdentityCodec.to_target(orig, ctx)
+    assert section.model_catalog_json == "/Users/exampleuser/.codex/model-catalog-600k.json"
 
 
 def test_round_trip_all_three_combined() -> None:
@@ -97,7 +106,7 @@ def test_claude_emits_loss_warning_for_context_window() -> None:
     ident = Identity(context_window=600000)
     ctx = TranspileCtx()
     ClaudeIdentityCodec.to_target(ident, ctx)
-    matching = [w for w in ctx.warnings if "P1-F" in w.message and "context_window" in w.message]
+    matching = [w for w in ctx.warnings if "context_window" in w.message]
     assert len(matching) == 1, f"expected one P1-F context_window LossWarning, got {ctx.warnings}"
     assert matching[0].domain == Domains.IDENTITY
     assert matching[0].target == BUILTIN_CLAUDE
@@ -107,7 +116,7 @@ def test_claude_emits_loss_warning_for_compact_threshold() -> None:
     ident = Identity(compact_threshold=540000)
     ctx = TranspileCtx()
     ClaudeIdentityCodec.to_target(ident, ctx)
-    matching = [w for w in ctx.warnings if "P1-F" in w.message and "compact_threshold" in w.message]
+    matching = [w for w in ctx.warnings if "compact_threshold" in w.message]
     assert len(matching) == 1, (
         f"expected one P1-F compact_threshold LossWarning, got {ctx.warnings}"
     )
@@ -119,9 +128,7 @@ def test_claude_emits_loss_warning_for_model_catalog_path() -> None:
     ident = Identity(model_catalog_path="/tmp/catalog.json")
     ctx = TranspileCtx()
     ClaudeIdentityCodec.to_target(ident, ctx)
-    matching = [
-        w for w in ctx.warnings if "P1-F" in w.message and "model_catalog_path" in w.message
-    ]
+    matching = [w for w in ctx.warnings if "model_catalog_path" in w.message]
     assert len(matching) == 1, (
         f"expected one P1-F model_catalog_path LossWarning, got {ctx.warnings}"
     )

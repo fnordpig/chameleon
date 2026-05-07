@@ -1,4 +1,4 @@
-"""Typed merge transactions and recovery detection (§4.6)."""
+"""Typed merge transactions and recovery detection."""
 
 from __future__ import annotations
 

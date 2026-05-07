@@ -230,7 +230,7 @@ def test_unmodelled_hook_command_type_drops_with_loss_warning() -> None:
     # The matcher survives; the unmodelled command was dropped.
     assert restored.hooks.pre_tool_use[0].hooks == []
     assert any(
-        w.target == BUILTIN_CLAUDE and "P1-B" in w.message and "prompt" in w.message
+        w.target == BUILTIN_CLAUDE and "hook" in w.message and "prompt" in w.message
         for w in ctx.warnings
     ), [w.message for w in ctx.warnings]
 
@@ -238,9 +238,9 @@ def test_unmodelled_hook_command_type_drops_with_loss_warning() -> None:
 # ---- Codex side --------------------------------------------------------------
 
 
-def test_codex_hooks_emits_loss_warning_referencing_p1b() -> None:
+def test_codex_hooks_emits_loss_warning() -> None:
     """Codex has no hooks ABI — neutral hooks must produce a typed
-    LossWarning that says so and references P1-B."""
+    LossWarning that says so."""
     neutral = Lifecycle(
         hooks=Hooks(
             pre_tool_use=[
@@ -253,7 +253,7 @@ def test_codex_hooks_emits_loss_warning_referencing_p1b() -> None:
     )
     ctx = TranspileCtx()
     CodexLifecycleCodec.to_target(neutral, ctx)
-    matching = [w for w in ctx.warnings if w.target == BUILTIN_CODEX and "P1-B" in w.message]
+    matching = [w for w in ctx.warnings if w.target == BUILTIN_CODEX and "hook" in w.message]
     assert matching, [w.message for w in ctx.warnings]
     assert any("Codex" in w.message and "hooks" in w.message for w in matching)
 

@@ -1,4 +1,4 @@
-"""P1-E — directives.personality is a first-class neutral concept.
+"""directives.personality is a first-class neutral concept.
 
 The Codex exemplar has a top-level ``personality = "pragmatic"`` key.
 Pre-P1-E, the Codex directives codec did not claim it; it landed in
@@ -125,7 +125,6 @@ def test_claude_setting_personality_emits_loss_warning() -> None:
     warning = ctx.warnings[0]
     assert warning.domain == Domains.DIRECTIVES
     assert warning.target == BUILTIN_CLAUDE
-    assert "P1-E" in warning.message
     assert "personality" in warning.message
     assert warning.field_path == FieldPath(segments=("personality",))
 

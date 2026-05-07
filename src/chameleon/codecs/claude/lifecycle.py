@@ -4,7 +4,7 @@ V0 surface:
   cleanup_period_days  ↔ cleanupPeriodDays
   hooks                ↔ hooks  (P1-B, parity-gap.md)
 
-Hooks are first-class as of P1-B: the section serializes to/from
+Hooks are first-class as of the section serializes to/from
 Claude's documented event-keyed shape (PascalCase event names ->
 list of matcher objects). Only the ``command`` HookCommand variant is
 modelled in V0; encountering ``prompt`` / ``agent`` / ``http`` /
@@ -130,10 +130,10 @@ class ClaudeLifecycleCodec:
                 LossWarning(
                     domain=Domains.LIFECYCLE,
                     target=BUILTIN_CLAUDE,
-                    message="lifecycle.telemetry not propagated to Claude in V0 (§15.2)",
+                    message="lifecycle.telemetry not propagated to Claude in V0",
                 )
             )
-        # Wave-10 §15.x — lifecycle.history.persistence has no Claude analogue
+        # lifecycle.history.persistence has no Claude analogue
         # at the settings-file level. Claude does expose
         # CLAUDE_CODE_SKIP_PROMPT_HISTORY as an environment variable that
         # toggles transcript writes entirely, but that lives under the
@@ -228,7 +228,7 @@ def _hooks_from_target(section: ClaudeHooksSection, ctx: TranspileCtx) -> Hooks:
                 domain=Domains.LIFECYCLE,
                 target=BUILTIN_CLAUDE,
                 message=(
-                    f"hooks event {extra_event!r} not modelled in V0 (P1-B); "
+                    f"hooks event {extra_event!r} not modelled in V0; "
                     "extending the neutral Hooks schema is the right fix"
                 ),
                 field_path=FieldPath(segments=("hooks", extra_event)),

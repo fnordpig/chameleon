@@ -1,13 +1,13 @@
 """End-to-end exemplar smoke test.
 
 Drives `chameleon` as a subprocess against the sanitized exemplar
-fixture, asserting the V0+post-Wave-4 contract:
+fixture, asserting the V0+post- contract:
 
   - `init` against a real-world Claude+Codex setup doesn't crash.
   - First `merge --on-conflict=keep` doesn't crash.
   - 71 non-`mcpServers` keys in `~/.claude.json` (partial-owned)
     survive the round-trip.
-  - The legacy attribution alias consolidation (P1-D) is observable
+  - The legacy attribution alias consolidation is observable
     and stable.
   - `chameleon diff <target>` correctly detects manual drift.
   - `chameleon discard <target> --yes` restores live to state-repo HEAD.
@@ -16,7 +16,7 @@ fixture, asserting the V0+post-Wave-4 contract:
 Two known bugs documented in
 ``docs/superpowers/specs/2026-05-06-smoke-findings.md`` remain pinned
 as xfails here so the test suite doesn't drift away from honest
-reporting (B1 was fixed in Wave-5; ``test_codex_tui_subtable_preserved``
+reporting (B1 was fixed in ; ``test_codex_tui_subtable_preserved``
 is now a passing assertion):
 
   - B2: Marketplace dict ordering instability across keep-merges.
@@ -77,7 +77,7 @@ def _run(args: list[str], env_paths: dict[str, Path]) -> subprocess.CompletedPro
 
 
 def test_exemplar_init_and_first_merge_succeed(exemplar_env: dict[str, Path]) -> None:
-    """The exemplar exists *because* a real init crashed pre-Wave-1."""
+    """The exemplar exists *because* a real init crashed pre-."""
     init = _run(["init"], exemplar_env)
     assert init.returncode == 0, f"init failed: {init.stderr[-500:]}"
     merge = _run(["merge", "--on-conflict=keep"], exemplar_env)
@@ -104,7 +104,7 @@ def test_dotclaude_partial_owned_preserves_unowned_keys(
 def test_legacy_attribution_aliases_consolidate_to_attribution_commit(
     exemplar_env: dict[str, Path],
 ) -> None:
-    """P1-D: the three legacy bool aliases should consolidate into a single
+    """the three legacy bool aliases should consolidate into a single
     `attribution.commit` entry (the canonical modern form).
     """
     live_settings = exemplar_env["home"] / ".claude" / "settings.json"

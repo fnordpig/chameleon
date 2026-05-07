@@ -1,4 +1,4 @@
-"""Wave-13 S1 — Authorization LCD schema sanity tests.
+"""S1 — Authorization LCD schema sanity tests.
 
 These tests pin the lowest-common-denominator vocabulary the schema
 exports for the P3 unification (see

@@ -1,4 +1,4 @@
-"""Invalidation-hash properties (Wave-15 §1).
+"""Invalidation-hash properties ().
 
 The hash captures ``(n0, n1, per_target)``. Two records with the same
 shape produce the same hash; perturbing any of the three inputs changes

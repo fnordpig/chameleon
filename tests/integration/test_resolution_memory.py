@@ -1,4 +1,4 @@
-"""Wave-15 §6 integration acceptance: resolution-memory behaviour.
+"""integration acceptance: resolution-memory behaviour.
 
 The four behavioural acceptance criteria implementable without the
 interactive UI (W15-B owns that):
@@ -54,7 +54,7 @@ def _read_neutral(path: Path) -> Neutral:
 
 
 def test_same_hash_auto_applies_silently(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Acceptance §6.1: same disagreement, same decision → no re-prompt."""
+    """Acceptance: same disagreement, same decision → no re-prompt."""
     paths = _setup_env(monkeypatch, tmp_path)
     neutral_file = paths["config"] / "chameleon" / "neutral.yaml"
 
@@ -142,7 +142,7 @@ def test_same_hash_auto_applies_silently(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_gc_removes_stale_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Acceptance §6.4: GC prunes resolutions whose disagreement converged."""
+    """Acceptance: GC prunes resolutions whose disagreement converged."""
     paths = _setup_env(monkeypatch, tmp_path)
     neutral_file = paths["config"] / "chameleon" / "neutral.yaml"
 
@@ -179,7 +179,7 @@ def test_gc_removes_stale_entries(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 def test_non_interactive_strategy_does_not_persist(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Acceptance §6.5: ``--on-conflict=keep`` stores zero new resolutions."""
+    """Acceptance: ``--on-conflict=keep`` stores zero new resolutions."""
     paths = _setup_env(monkeypatch, tmp_path)
     neutral_file = paths["config"] / "chameleon" / "neutral.yaml"
 
@@ -212,7 +212,7 @@ def test_resolutions_list_and_clear_end_to_end(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Acceptance §6.6: list/clear subcommands work end-to-end."""
+    """Acceptance: list/clear subcommands work end-to-end."""
     paths = _setup_env(monkeypatch, tmp_path)
     neutral_file = paths["config"] / "chameleon" / "neutral.yaml"
 

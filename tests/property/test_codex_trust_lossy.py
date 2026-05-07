@@ -1,6 +1,6 @@
-"""A-TRUST — Codex governance Trust list lossy-collapse warnings.
+"""Codex governance Trust list lossy-collapse warnings.
 
-Wave-9 Agent A documented two cases where the neutral ``Trust`` schema
+ Agent A documented two cases where the neutral ``Trust`` schema
 can express information that the Codex wire shape physically cannot
 represent:
 
@@ -35,7 +35,6 @@ def _atrust_warnings(ctx: TranspileCtx) -> list[LossWarning]:
         if isinstance(w, LossWarning)
         and w.target == BUILTIN_CODEX
         and w.domain is Domains.GOVERNANCE
-        and "A-TRUST" in w.message
     ]
 
 

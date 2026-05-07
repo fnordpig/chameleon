@@ -6,12 +6,12 @@ data those domains *claim* (Codex ``[plugins.*]``, ``[projects.*]``,
 ``[marketplaces.*]``; Claude ``enabledPlugins``, ``extraKnownMarketplaces``,
 ``permissions``), the merge engine must preserve that data on re-derive.
 
-Wave-2's per-FieldPath classifier (P2-1) was supposed to make this work
+'s per-FieldPath classifier (P2-1) was supposed to make this work
 — silence on the neutral side (``n0`` empty, ``n1`` empty) plus evidence
 on at least one target side should classify CONSENSUAL and write the
 target's value into ``composed``. The bug surfaced by running
 ``chameleon merge`` against the sanitized exemplar at
-``tests/fixtures/exemplar/`` after Wave-2 landed: claimed entries
+``tests/fixtures/exemplar/`` after  landed: claimed entries
 visible in the live files before the merge are missing after.
 
 The acceptance criterion (parity-gap doc, P0-3 #2 + #3) is sharper than

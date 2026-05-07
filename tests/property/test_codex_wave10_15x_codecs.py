@@ -1,7 +1,7 @@
-"""Wave-10 §15.x — round-trip + LossWarning tests for the five Codex
+"""round-trip + LossWarning tests for the five Codex
 codec slots that previously dropped enum-typed neutral fields.
 
-The Wave-8 enum-exhaustion harness already proves the round-trip on the
+The  enum-exhaustion harness already proves the round-trip on the
 finite enum domain; this file documents the wire-mapping decisions and
 exercises the specific LossWarning paths that exhaustion can't reach
 (lossy axes are by definition skipped by the round-trip prover).
@@ -9,7 +9,7 @@ exercises the specific LossWarning paths that exhaustion can't reach
 Wire mappings (with ``_generated.py`` evidence):
 
 * ``identity.auth.method``     ↔ ``forced_login_method`` (``ForcedLoginMethod`` enum)
-  Wave-11 §15.x reconciliation: after AuthMethod was shrunk to {OAUTH,
+   reconciliation: after AuthMethod was shrunk to {OAUTH,
   API_KEY}, both values are bidirectional (``OAUTH ↔ chatgpt``,
   ``API_KEY ↔ api``); no LossWarning path remains on encode. Decode
   still warns on unknown wire values for forward-compat.
@@ -67,7 +67,7 @@ def test_codex_identity_auth_method_round_trip(neutral: AuthMethod, wire: str) -
 
 
 def test_codex_identity_auth_method_full_round_trip_after_reconciliation() -> None:
-    """Wave-11 §15.x reconciliation: after AuthMethod was shrunk to
+    """reconciliation: after AuthMethod was shrunk to
     {OAUTH, API_KEY}, every neutral value has a Codex wire equivalent
     and round-trips lossless. The previous ``loss_warns_on_unsupported``
     test (BEDROCK / VERTEX / AZURE) is gone with the values it asserted on.
@@ -81,7 +81,7 @@ def test_codex_identity_auth_method_full_round_trip_after_reconciliation() -> No
         section = CodexIdentityCodec.to_target(Identity(auth=IdentityAuth(method=method)), ctx)
         assert section.forced_login_method is not None, (
             f"AuthMethod.{method.name} did not produce a wire value; "
-            "Wave-11 reconciliation expects every neutral value to map. "
+            " reconciliation expects every neutral value to map. "
             "If you added a value, mirror it in CodexIdentityCodec or "
             "remove it from AuthMethod."
         )

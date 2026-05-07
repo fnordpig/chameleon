@@ -54,7 +54,7 @@ class ClaudeGovernanceCodec:
                     target=BUILTIN_CLAUDE,
                     message=(
                         "governance.trust managed via ~/.claude.json's per-project "
-                        "trust state, not settings.json (§15.4)"
+                        "trust state, not settings.json"
                     ),
                 )
             )

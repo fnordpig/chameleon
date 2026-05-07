@@ -1,8 +1,8 @@
 """Codex codec for directives.
 
 V0: commit_attribution + system_prompt_file.
-P1-E: personality (fixed-vocabulary StrEnum mirroring upstream).
-Wave-10 §15.x: verbosity ↔ model_verbosity (Responses API ``text.verbosity``).
+personality (fixed-vocabulary StrEnum mirroring upstream).
+: verbosity ↔ model_verbosity (Responses API ``text.verbosity``).
 
 Codex's ``model_verbosity`` is a top-level ``Verbosity`` enum
 (``low``/``medium``/``high``) on ``ConfigToml`` — exactly the same
@@ -29,7 +29,7 @@ class CodexDirectivesSection(BaseModel):
     model_instructions_file: str | None = None
     commit_attribution: str | None = None
     personality: CodexPersonality | None = None
-    # Wave-10 §15.x — directives.verbosity ↔ model_verbosity.
+    # directives.verbosity ↔ model_verbosity.
     model_verbosity: CodexVerbosity | None = None
 
 
@@ -42,7 +42,7 @@ class CodexDirectivesCodec:
             FieldPath(segments=("model_instructions_file",)),
             FieldPath(segments=("commit_attribution",)),
             FieldPath(segments=("personality",)),
-            # Wave-10 §15.x:
+            # :
             FieldPath(segments=("model_verbosity",)),
         }
     )
@@ -55,7 +55,7 @@ class CodexDirectivesCodec:
         codex_personality = (
             CodexPersonality(model.personality.value) if model.personality is not None else None
         )
-        # Wave-10 §15.x — same StrEnum-by-value pattern as personality.
+        # same StrEnum-by-value pattern as personality.
         codex_verbosity = (
             CodexVerbosity(model.verbosity.value) if model.verbosity is not None else None
         )

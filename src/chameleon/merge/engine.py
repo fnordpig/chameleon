@@ -1,6 +1,6 @@
-"""Merge engine — the round-trip orchestrator (§4.3 pipeline).
+"""Merge engine — the round-trip orchestrator ( pipeline).
 
-V0 implements a simplified version of the full §4.3 pipeline:
+V0 implements a simplified version of the full pipeline:
   - Sampling, disassemble, drift detect, classify, resolve, compose,
     re-derive, write live, commit state-repos, update neutral.
   - Interactive resolution is deferred; V0 accepts only Strategy
@@ -194,7 +194,7 @@ def _write_leaf(
     same rule applies to ``dict_key`` (issue #44): we mutate just that
     str-keyed entry, leaving sibling keys untouched.
 
-    Schema-aware coercion (B3): ``setattr`` bypasses Pydantic's
+    Schema-aware coercion: ``setattr`` bypasses Pydantic's
     field-level validators, so the resolver's raw return values
     (``str`` for an ``Enum`` field, ``dict`` for a nested model, etc.)
     must be funneled through ``TypeAdapter(annotation).validate_python``
@@ -306,7 +306,7 @@ def _apply_target_specific(
 ) -> None:
     """Plumb a TARGET_SPECIFIC resolution through composed + overlays.
 
-    Per resolution-memory spec §2.1 + §2.2: for a TARGET_SPECIFIC
+    Per resolution-memory spec +: for a TARGET_SPECIFIC
     decision, harvest each target's current per-target value into
     ``composed.targets[tid].target_specific[<path>]`` (so it survives
     into next merge), and patch each target's overlay at the unified
@@ -383,7 +383,7 @@ def _gc_resolutions(composed: Neutral, per_target_neutral: dict[TargetId, Neutra
 
     Walks ``composed.resolutions.items`` and removes entries where the
     unified neutral value at the path now equals every per-target value
-    (i.e. there is no current cross-target disagreement). Per spec §1
+    (i.e. there is no current cross-target disagreement). Per spec
     "GC" — runs only on successful merges; failed merges leave entries
     intact so the operator can retry.
 
@@ -493,6 +493,15 @@ class MergeEngine:
                 out[spec.repo_path] = live.read_bytes()
         return out
 
+    def _target_latest_mtime_ns(self, target_cls: type[Target]) -> int | None:
+        """Newest mtime among a target's live files, or None when absent."""
+        mtimes: list[int] = []
+        for spec in target_cls.assembler.files:
+            live = Path(os.path.expanduser(spec.live_path))
+            if live.exists():
+                mtimes.append(live.stat().st_mtime_ns)
+        return max(mtimes) if mtimes else None
+
     def _ensure_state_repo(self, target_id: TargetId) -> GitRepo:
         repo_path = self.paths.target_repo(target_id)
         if (repo_path / ".git").exists():
@@ -519,6 +528,9 @@ class MergeEngine:
                 n1_raw = {str(k): v for k, v in raw.items()}
         else:
             n1 = Neutral(schema_version=1)
+        neutral_mtime_ns = (
+            self.paths.neutral.stat().st_mtime_ns if self.paths.neutral.exists() else None
+        )
 
         if self.paths.lkg.exists():
             n0 = Neutral.model_validate(load_yaml(self.paths.lkg))
@@ -529,12 +541,16 @@ class MergeEngine:
         ctx = TranspileCtx(profile_name=request.profile_name)
         per_target_neutral: dict[TargetId, Neutral] = {}
         per_target_passthrough: dict[TargetId, dict[str, object]] = {}
+        per_target_mtime_ns: dict[TargetId, int] = {}
 
         for tid in self.targets.target_ids():
             target_cls = self.targets.get(tid)
             if target_cls is None:
                 continue
             live = self._read_live_files(target_cls)
+            target_mtime = self._target_latest_mtime_ns(target_cls)
+            if target_mtime is not None:
+                per_target_mtime_ns[tid] = target_mtime
             # P0-2: pass `ctx` so per-domain ValidationError surfaces as a
             # LossWarning (collected on the same ctx codecs already use)
             # rather than aborting the whole merge.
@@ -582,8 +598,16 @@ class MergeEngine:
             tid: composed.model_copy(deep=True) for tid in per_target_neutral
         }
 
-        records = walk_changes(n0, n1, per_target_neutral, n1_authored=n1_raw)
-        # Resolution-memory bookkeeping (Wave-15 §1).
+        records = [
+            rec.model_copy(
+                update={
+                    "neutral_mtime_ns": neutral_mtime_ns,
+                    "per_target_mtime_ns": per_target_mtime_ns,
+                }
+            )
+            for rec in walk_changes(n0, n1, per_target_neutral, n1_authored=n1_raw)
+        ]
+        # Resolution-memory bookkeeping ().
         #
         # ``existing_resolutions`` is a snapshot of the persisted decisions
         # at the start of this merge — we look entries up by the same
@@ -592,7 +616,7 @@ class MergeEngine:
         # during this run; we copy ``existing_resolutions`` into it (less
         # any auto-applied entries that no longer match) and write the
         # union back into ``composed`` at the end. The non-interactive
-        # ``persist=False`` rule from spec §3 means batch strategies leave
+        # ``persist=False`` rule from spec means batch strategies leave
         # the dict untouched.
         existing_resolutions: dict[str, Resolution] = dict(n1.resolutions.items)
         new_resolutions: dict[str, Resolution] = dict(existing_resolutions)
@@ -625,23 +649,23 @@ class MergeEngine:
                         )
                 continue
             if cl.outcome is ChangeOutcome.CONFLICT:
-                # Resolution-memory lookup (Wave-15 §1).
+                # Resolution-memory lookup ().
                 #
                 # Before queueing a CONFLICT for the resolver, check
                 # whether the operator has already decided the same
                 # disagreement. If the stored decision's hash matches
                 # the current record's hash, apply silently. If the hash
                 # has drifted, surface the prior decision on the
-                # ``Conflict`` so an interactive resolver (W15-B) can
+                # ``Conflict`` so an interactive resolver can
                 # render it as a default. ``SKIP`` decisions never
-                # auto-apply per spec §1.
+                # auto-apply per spec.
                 rec_path_str = render_change_path(rec)
                 prior = existing_resolutions.get(rec_path_str)
                 if prior is not None:
                     rec_hash = compute_decision_hash(rec)
                     if prior.decision_hash == rec_hash:
                         if prior.decision is ResolutionDecisionKind.SKIP:
-                            # SKIP is intentionally non-replaying (§1):
+                            # SKIP is intentionally non-replaying:
                             # the operator left it unresolved last time
                             # and we don't change that decision silently.
                             # Fall through to the per-target preservation
@@ -719,7 +743,7 @@ class MergeEngine:
         # ``persist=True`` (interactive resolutions) get written back
         # into ``composed.resolutions`` so the next merge can replay
         # them silently. Non-interactive strategies set ``persist=False``
-        # (resolution-memory spec §3) so batch one-shot runs don't
+        # (resolution-memory spec ) so batch one-shot runs don't
         # mutate persisted state.
         for c in conflicts:
             outcome = self._resolver.resolve(c)
@@ -776,7 +800,7 @@ class MergeEngine:
             # Pydantic to validate-and-coerce the merged dict (e.g. nested
             # tomlkit Table values normalize to plain dict at this hop).
             # Preserve any ``target_specific`` entries already on the bag —
-            # the resolution-memory plumb (Wave-15 §2.2) writes per-target
+            # the resolution-memory plumb () writes per-target
             # values into ``existing_bag.target_specific`` *before* this
             # composition step; rebuilding the bag from ``items`` only
             # would silently drop them.
@@ -878,16 +902,16 @@ class MergeEngine:
                 diffs=diffs,
             )
 
-        # 7a. GC stale resolutions (Wave-15 §1).
+        # 7a. GC stale resolutions ().
         #
         # Walk ``composed.resolutions.items`` and prune entries whose
         # disagreement has resolved itself (the unified neutral leaf
-        # equals every per-target leaf). Per spec §1 GC: runs only on
+        # equals every per-target leaf). Per spec GC: runs only on
         # successful merges; failed merges (the dry-run early-return
         # above) leave entries intact so the operator can retry.
         _gc_resolutions(composed, per_target_neutral)
 
-        # 7b. Recovery marker (§4.6).
+        # 7b. Recovery marker.
         #
         # Before mutating any live target file, persist a `MergeTransaction`
         # describing what we are about to do. The marker captures:
@@ -973,7 +997,7 @@ class MergeEngine:
             self.paths.neutral.parent.mkdir(parents=True, exist_ok=True)
             self.paths.neutral.write_text(composed_yaml, encoding="utf-8")
 
-        # Recovery marker cleanup (§4.6): a clean merge means any prior
+        # Recovery marker cleanup: a clean merge means any prior
         # interruption has been resolved by the new consistent state we just
         # landed. Clear our own marker AND every pre-existing stale marker.
         for stale in self.tx_store.entries():

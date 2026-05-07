@@ -103,7 +103,7 @@ class CodexAssembler:
                         inner[k] = v
                     mp_table[mp_name] = inner
                 doc["marketplaces"] = mp_table
-            # Wave-10 §15.x — top-level ``web_search`` mode (StrEnum value).
+            # top-level ``web_search`` mode (StrEnum value).
             if capabilities.web_search is not None:
                 doc["web_search"] = capabilities.web_search.value
 
@@ -111,7 +111,7 @@ class CodexAssembler:
         if isinstance(environment, CodexEnvironmentSection):
             sep = tomlkit.table()
             sep["set"] = environment.shell_environment_policy.set
-            # Wave-10 §15.x — emit ``inherit`` when the codec set it.
+            # emit ``inherit`` when the codec set it.
             if environment.shell_environment_policy.inherit is not None:
                 sep["inherit"] = environment.shell_environment_policy.inherit
             doc["shell_environment_policy"] = sep
@@ -125,7 +125,7 @@ class CodexAssembler:
                 ws["writable_roots"] = list(authorization.sandbox_workspace_write.writable_roots)
                 doc["sandbox_workspace_write"] = ws
             if authorization.approval_policy is not None:
-                # Wave-13 S3 — ``approval_policy`` is either a plain wire
+                #  S3 — ``approval_policy`` is either a plain wire
                 # string (the 4 LCD enum arms the codec round-trips) or a
                 # dict (the granular ``AskForApproval4`` arm preserved
                 # raw via section field typing). Both serialise cleanly
@@ -142,7 +142,7 @@ class CodexAssembler:
                 for k, v in history_dump.items():
                     history_table[k] = v
                 doc["history"] = history_table
-            # Wave-10 §15.x — emit the ``[otel]`` block when the codec
+            # emit the ``[otel]`` block when the codec
             # populated an exporter. ``model_dump`` flattens the
             # discriminated-union arm into a TOML-compatible dict (e.g.
             # ``{"exporter": "none"}`` for the plain-enum arm or
@@ -264,21 +264,21 @@ class CodexAssembler:
         identity_keys = {
             "model",
             "model_reasoning_effort",
-            # P1-F — Codex-only identity tuning knobs.
+            # Codex-only identity tuning knobs.
             "model_context_window",
             "model_auto_compact_token_limit",
             "model_catalog_json",
-            # Wave-10 §15.x — auth.method.
+            # auth.method.
             "forced_login_method",
         }
         directives_keys = {
             "model_instructions_file",
             "commit_attribution",
             "personality",  # P1-E
-            # Wave-10 §15.x — directives.verbosity.
+            # directives.verbosity.
             "model_verbosity",
         }
-        # Wave-10 §15.x — capabilities.web_search.
+        # capabilities.web_search.
         capabilities_keys = {"mcp_servers", "plugins", "marketplaces", "web_search"}
         environment_keys = {"shell_environment_policy"}
         authorization_keys = {
@@ -287,7 +287,7 @@ class CodexAssembler:
             "approval_policy",
             "approvals_reviewer",
         }
-        # Wave-10 §15.x — lifecycle.telemetry.exporter ↔ otel.exporter.
+        # lifecycle.telemetry.exporter ↔ otel.exporter.
         lifecycle_keys = {"history", "otel"}
         interface_keys = {"tui", "file_opener"}
         governance_keys = {"features", "projects"}

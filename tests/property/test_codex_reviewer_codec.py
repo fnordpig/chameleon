@@ -1,4 +1,4 @@
-"""P1-G — ``authorization.reviewer`` round-trip + cross-codec parity.
+"""``authorization.reviewer`` round-trip + cross-codec parity.
 
 Codex's ``approvals_reviewer`` (one of ``user`` / ``auto_review`` /
 ``guardian_subagent``) is promoted to a neutral ``authorization.reviewer``
@@ -77,19 +77,19 @@ def test_codex_unknown_wire_value_warns_and_drops() -> None:
     ctx = TranspileCtx()
     auth = CodexAuthorizationCodec.from_target(section, ctx)
     assert auth.reviewer is None
-    p1g_warnings = [
+    reviewer_warnings = [
         w
         for w in ctx.warnings
         if isinstance(w, LossWarning)
         and w.target == BUILTIN_CODEX
         and w.domain is Domains.AUTHORIZATION
-        and "P1-G" in w.message
+        and "approvals_reviewer" in w.message
     ]
-    assert len(p1g_warnings) == 1, (
-        "expected exactly one P1-G-tagged LossWarning for the unknown "
+    assert len(reviewer_warnings) == 1, (
+        "expected exactly one approvals_reviewer LossWarning for the unknown "
         f"wire value; got {[w.message for w in ctx.warnings]}"
     )
-    assert "not-a-real-reviewer" in p1g_warnings[0].message
+    assert "not-a-real-reviewer" in reviewer_warnings[0].message
 
 
 def test_exemplar_disassemble_populates_reviewer() -> None:
@@ -107,7 +107,7 @@ def test_exemplar_disassemble_populates_reviewer() -> None:
     config_bytes = (FIXTURE_HOME / "_codex" / "config.toml").read_bytes()
     domains, passthrough = CodexAssembler.disassemble({CodexAssembler.CONFIG_TOML: config_bytes})
     assert "approvals_reviewer" not in passthrough, (
-        "P1-G: ``approvals_reviewer`` must be claimed by the authorization "
+        "``approvals_reviewer`` must be claimed by the authorization "
         "codec, not leaked to pass-through"
     )
     auth_section = domains.get(Domains.AUTHORIZATION)
@@ -130,21 +130,21 @@ def test_claude_emits_p1g_loss_warning_when_reviewer_set() -> None:
     # The target_section model has no reviewer field; encoding must NOT
     # gain one as a side effect of P1-G.
     assert "reviewer" not in section.model_dump()
-    p1g_warnings = [
+    reviewer_warnings = [
         w
         for w in ctx.warnings
         if isinstance(w, LossWarning)
         and w.target == BUILTIN_CLAUDE
         and w.domain is Domains.AUTHORIZATION
-        and "P1-G" in w.message
+        and "reviewer" in w.message
     ]
-    assert len(p1g_warnings) == 1, (
-        "expected exactly one P1-G-tagged LossWarning on the Claude side; "
+    assert len(reviewer_warnings) == 1, (
+        "expected exactly one reviewer LossWarning on the Claude side; "
         f"got {[w.message for w in ctx.warnings]}"
     )
     # And the value should appear in the message so the operator can
     # actually see what was dropped.
-    assert "guardian_subagent" in p1g_warnings[0].message
+    assert "guardian_subagent" in reviewer_warnings[0].message
 
 
 def test_claude_no_warning_when_reviewer_unset() -> None:

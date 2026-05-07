@@ -4,7 +4,7 @@ Walks every wire-level field in a target's generated upstream Pydantic
 ``full_model`` (e.g. ``ClaudeCodeSettings``, ``ConfigToml``) and classifies
 each field path against the codecs registered for that target.
 
-Classification (per Wave-8 spec; see ``test_no_silent_upstream_drops.py``
+Classification (per  spec; see ``test_no_silent_upstream_drops.py``
 docstring for the full rationale):
 
 * **Claimed** — some codec for that target has the field's path in its
@@ -29,7 +29,7 @@ Where this walker is deliberately conservative
 * The walk descends into nested ``BaseModel`` fields, ``dict[K, BaseModel]``
   values, ``list[BaseModel]`` elements, ``RootModel[...]`` wrappers, and
   every ``BaseModel`` arm of a Union (PEP 604 or ``typing.Union``). Lessons
-  from Wave-7 F2: anything that can carry operator-written keys is reachable.
+  from  F2: anything that can carry operator-written keys is reachable.
 
 * Field-path *segments* are upstream **wire keys** — the alias when one is
   declared, otherwise the Python attribute name. That mirrors how

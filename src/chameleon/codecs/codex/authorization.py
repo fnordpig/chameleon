@@ -1,6 +1,6 @@
 """Codex codec for the authorization domain.
 
-Wave-13 S3 — LCD scheme. Maps the LCD axes Codex actually has on the
+ S3 — LCD scheme. Maps the LCD axes Codex actually has on the
 wire and emits typed ``LossWarning``s for the Claude-only axes.
 
 Wire claims:
@@ -15,7 +15,7 @@ Wire claims:
     ON_REQUEST       ↔ "on-request"
     NEVER            ↔ "never"
   filesystem.allow_write             ↔ [sandbox_workspace_write].writable_roots
-  reviewer (P1-G)                    ↔ approvals_reviewer
+  reviewer                    ↔ approvals_reviewer
 
 LCD-discipline drops:
 
@@ -33,7 +33,7 @@ LCD-discipline drops:
 
 Pattern lists (allow/ask/deny) and the network sub-block remain
 LossWarning-on-encode; mapping them to Codex's
-``[permissions.<name>]`` profiles is deferred to §15.1.
+``[permissions.<name>]`` profiles is.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ _CODEX_TO_SANDBOX_MODE: dict[str, SandboxMode] = {
     "danger-full-access": SandboxMode.FULL_ACCESS,
 }
 
-# Wave-13 S3 — neutral ``ApprovalPolicy`` <-> Codex ``approval_policy``
+#  S3 — neutral ``ApprovalPolicy`` <-> Codex ``approval_policy``
 # (the 4 plain-enum arms of upstream's ``AskForApproval`` discriminated
 # RootModel union; the 5th arm — ``AskForApproval4`` granular — is a
 # structured BaseModel and lives in pass-through). Wire values use
@@ -84,7 +84,7 @@ _CODEX_TO_APPROVAL_POLICY: dict[str, ApprovalPolicy] = {
     "never": ApprovalPolicy.NEVER,
 }
 
-# P1-G — neutral ``authorization.reviewer`` <-> Codex ``approvals_reviewer``.
+# neutral ``authorization.reviewer`` <-> Codex ``approvals_reviewer``.
 # Both enums share the same wire vocabulary; we map enum members rather than
 # strings so a future upstream regen that drops or renames a value will
 # fail typing here, not silently at runtime.
@@ -111,7 +111,7 @@ class CodexAuthorizationSection(BaseModel):
     sandbox_workspace_write: _CodexSandboxWorkspaceWrite = Field(
         default_factory=_CodexSandboxWorkspaceWrite
     )
-    # Wave-13 S3: typed loose to accommodate both the 4 plain-enum arms
+    #  S3: typed loose to accommodate both the 4 plain-enum arms
     # of upstream ``AskForApproval`` (a wire string like ``"on-request"``)
     # AND the ``AskForApproval4`` granular arm (a TOML inline table that
     # decodes to a dict). The codec resolves the str case to
@@ -122,7 +122,7 @@ class CodexAuthorizationSection(BaseModel):
     # loose so unknown wire payloads land here and hit a typed
     # LossWarning rather than crashing inside Pydantic).
     approval_policy: str | dict[str, object] | None = None
-    # P1-G: stored as the raw wire string (not the upstream ``ApprovalsReviewer``
+    # stored as the raw wire string (not the upstream ``ApprovalsReviewer``
     # enum) so that an unrecognized value disassembled from live config can
     # land in the section, hit ``from_target``, and emit a typed LossWarning
     # rather than crash inside Pydantic. Mirrors the ``sandbox_mode`` pattern
@@ -174,7 +174,7 @@ class CodexAuthorizationCodec:
                     message=(
                         "authorization.{allow,ask,deny}_patterns are Claude-specific "
                         "shell-pattern allow-lists; the Codex equivalent (named "
-                        "[permissions.<name>] profiles) lands in §15.1"
+                        "[permissions.<name>] profiles)"
                     ),
                 )
             )
@@ -189,8 +189,7 @@ class CodexAuthorizationCodec:
                     domain=Domains.AUTHORIZATION,
                     target=BUILTIN_CODEX,
                     message=(
-                        "authorization.network mapping to Codex's named permission "
-                        "profiles is deferred to §15.1"
+                        "authorization.network mapping to Codex's named permission profiles is"
                     ),
                 )
             )
@@ -201,7 +200,7 @@ class CodexAuthorizationCodec:
                     target=BUILTIN_CODEX,
                     message=(
                         "filesystem.{allow_read, deny_read, deny_write} have no "
-                        "Codex sandbox equivalents in V0 (§15.1)"
+                        "Codex sandbox equivalents in V0"
                     ),
                 )
             )
@@ -220,8 +219,7 @@ class CodexAuthorizationCodec:
                         domain=Domains.AUTHORIZATION,
                         target=BUILTIN_CODEX,
                         message=(
-                            f"sandbox_mode {section.sandbox_mode!r} has no neutral "
-                            f"equivalent in V0 (§15.1)"
+                            f"sandbox_mode {section.sandbox_mode!r} has no neutral equivalent in V0"
                         ),
                     )
                 )
@@ -270,7 +268,7 @@ class CodexAuthorizationCodec:
                         target=BUILTIN_CODEX,
                         message=(
                             f"approvals_reviewer {section.approvals_reviewer!r} is "
-                            "not in the documented vocabulary (P1-G); dropping"
+                            "not in the documented vocabulary; dropping"
                         ),
                     )
                 )

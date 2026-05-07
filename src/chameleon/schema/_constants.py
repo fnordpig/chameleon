@@ -1,7 +1,7 @@
 """Closed enums and built-in TargetId constants.
 
-The Domains enum is closed by design (§7 note): adding a domain is a
-core change. The OnConflict enum mirrors the §5.2 strategies. Built-in
+The Domains enum is closed by design ( note): adding a domain is a
+core change. The OnConflict enum mirrors the strategies. Built-in
 TargetIds are registered at import time so they can be used as
 sentinels in tests, CLI parsing, and codec class declarations.
 """
@@ -14,7 +14,7 @@ from chameleon._types import TargetId, register_target_id
 
 
 class Domains(Enum):
-    """The eight orthogonal slices of the schema ontology (§7).
+    """The eight orthogonal slices of the schema ontology.
 
     Members' .value is the lowercase YAML key in the neutral form
     (e.g. `Domains.IDENTITY.value == "identity"`).
@@ -31,9 +31,10 @@ class Domains(Enum):
 
 
 class OnConflict(Enum):
-    """Non-interactive conflict resolution strategies (§5.2)."""
+    """Non-interactive conflict resolution strategies."""
 
     FAIL = "fail"
+    LATEST = "latest"
     KEEP = "keep"
     PREFER_TARGET = "prefer-target"
     PREFER_NEUTRAL = "prefer-neutral"

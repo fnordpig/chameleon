@@ -1,4 +1,4 @@
-"""Cross-target unification proof for ``capabilities.plugins`` (P1-A).
+"""Cross-target unification proof for ``capabilities.plugins``.
 
 The exemplar fixture has the same operator declaring ~40 plugins by hand
 across both Claude (``enabledPlugins``) and Codex (``[plugins.<id>]``).

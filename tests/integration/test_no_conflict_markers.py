@@ -1,6 +1,6 @@
 """Regression test: no tracked file may contain raw git conflict markers.
 
-Wave-2 had a near-miss where a commit was authored with raw
+ had a near-miss where a commit was authored with raw
 ``<<<<<<<`` / ``=======`` / ``>>>>>>>`` markers in tracked files (caught
 and discarded before reaching main). This test, combined with the
 dedicated ``no-conflict-markers`` workflow and the opt-in pre-commit

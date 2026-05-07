@@ -1,4 +1,4 @@
-"""P1-C: interface.voice as a structured object.
+"""interface.voice as a structured object.
 
 The Claude exemplar's `~/.claude/settings.json` carries both the legacy
 documented `voiceEnabled: bool` AND a newer undocumented `voice` object

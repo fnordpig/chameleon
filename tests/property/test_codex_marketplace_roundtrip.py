@@ -1,6 +1,6 @@
-"""Wave-11 F-MP — Codex marketplace round-trip pinning tests.
+"""Codex marketplace round-trip pinning tests.
 
-Wave-9 Agent B's FUZZ-3 cross-target fuzz suite surfaced three bugs in
+ Agent B's FUZZ-3 cross-target fuzz suite surfaced three bugs in
 the Codex marketplace codec. Each one corrupted operator-authored
 configuration silently when transpiling through the Codex lane:
 
@@ -15,7 +15,7 @@ configuration silently when transpiling through the Codex lane:
 * **F-AU** — ``PluginMarketplace.auto_update`` was silently dropped on
   every Codex round-trip regardless of source kind.
 
-The Wave-11 F-MP fix preserves the neutral discriminator and
+The  F-MP fix preserves the neutral discriminator and
 ``auto_update`` flag through the Codex lane:
 
 * ``auto_update`` is plumbed as a plain key on the marketplace entry —
@@ -141,7 +141,7 @@ def test_url_kind_codex_encoder_is_idempotent() -> None:
 
 
 # ---------------------------------------------------------------------------
-# F-AU — auto_update round-trip
+# auto_update round-trip
 # ---------------------------------------------------------------------------
 
 

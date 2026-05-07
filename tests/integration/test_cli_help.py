@@ -5,6 +5,8 @@ from pathlib import Path
 import pytest
 
 from chameleon import cli
+from chameleon.io.yaml import dump_yaml
+from chameleon.merge.resolve import LatestResolutionError, LatestResolver
 
 
 def test_cli_help_lists_v0_subcommands(capsys: pytest.CaptureFixture[str]) -> None:
@@ -37,6 +39,43 @@ def test_cli_merge_dry_run_invokable(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     rc = cli.main(["merge", "--dry-run", "--on-conflict=keep"])
     assert rc == 0
+
+
+def test_cli_merge_defaults_to_latest_resolver(monkeypatch: pytest.MonkeyPatch) -> None:
+    args = cli._build_parser().parse_args(["merge"])
+    monkeypatch.setattr(cli, "stdin_is_a_tty", lambda: False)
+    resolver = cli._resolver_from_args(args)
+    assert isinstance(resolver, LatestResolver)
+
+
+def test_cli_merge_latest_ambiguity_is_concise_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    class RaisingEngine:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def merge(self, *args: object, **kwargs: object) -> object:
+            raise LatestResolutionError("ambiguous latest conflict on identity.model")
+
+    monkeypatch.setattr(cli, "MergeEngine", RaisingEngine)
+
+    rc = cli.main(["merge", "--quiet", "--no-warn"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert captured.err == (
+        "error: ambiguous latest conflict on identity.model\n"
+        "rerun `chameleon merge` from an interactive shell or choose "
+        "`--on-conflict=<strategy>` explicitly\n"
+    )
 
 
 def test_cli_init_dry_run_is_side_effect_free(
@@ -97,3 +136,65 @@ def test_cli_verbose_emits_observable_extra_output(
     assert "verbose: neutral=" in verbose_err
     assert "verbose: targets=" in verbose_err
     assert "LossWarning(s)" in verbose_err
+
+
+def test_cli_merge_quiet_no_warn_is_silent_when_clean(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    assert cli.main(["init"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["merge", "--quiet", "--no-warn", "--on-conflict=keep"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_cli_merge_no_warn_suppresses_losswarning_errata(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    assert cli.main(["init"]) == 0
+    neutral = tmp_path / "config" / "chameleon" / "neutral.yaml"
+    neutral.write_text(
+        dump_yaml(
+            {
+                "schema_version": 1,
+                "identity": {
+                    "context_window": 600000,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    capsys.readouterr()
+    assert cli.main(["merge", "--on-conflict=prefer-neutral"]) == 0
+    with_warn = capsys.readouterr()
+    assert "warning:" in with_warn.err
+
+    neutral.write_text(
+        dump_yaml(
+            {
+                "schema_version": 1,
+                "identity": {
+                    "context_window": 700000,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert cli.main(["merge", "--on-conflict=prefer-neutral", "--no-warn"]) == 0
+    no_warn = capsys.readouterr()
+    assert "warning:" not in no_warn.err

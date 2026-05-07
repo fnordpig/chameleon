@@ -1,4 +1,4 @@
-"""Wave-15 §6.3: TARGET_SPECIFIC removes cross-target propagation.
+"""TARGET_SPECIFIC removes cross-target propagation.
 
 When the operator records a TARGET_SPECIFIC resolution for a path,
 each target keeps its own value; the unified neutral path stays unset
@@ -60,7 +60,7 @@ def _read_neutral(path: Path) -> Neutral:
 def test_target_specific_resolution_preserves_per_target_values(  # noqa: PLR0915 — full e2e
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """Acceptance §6.3: TARGET_SPECIFIC keeps Claude=high, Codex=low.
+    """Acceptance: TARGET_SPECIFIC keeps Claude=high, Codex=low.
 
     Drives the engine via a NonInteractiveResolver but seeds a stored
     TARGET_SPECIFIC Resolution with a matching hash so the engine's

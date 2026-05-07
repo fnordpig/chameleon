@@ -4,7 +4,7 @@ V0 thin slice:
   history.persistence  ↔ [history].persistence
   history.max_bytes    ↔ [history].max_bytes
 
-Wave-10 §15.x — telemetry.exporter ↔ [otel].exporter:
+telemetry.exporter ↔ [otel].exporter:
   Codex's ``OtelConfigToml.exporter`` is an ``OtelExporterKind`` RootModel
   union with three arms — a plain enum (``none``/``statsig``), an
   ``otlp-http`` table, or an ``otlp-grpc`` table. Neutral
@@ -65,7 +65,7 @@ def _hooks_has_any_event(hooks: Hooks) -> bool:
 
 
 class _CodexHistory(BaseModel):
-    # ``extra="allow"`` (B1) — unclaimed sub-keys round-trip through
+    # ``extra="allow"`` — unclaimed sub-keys round-trip through
     # ``__pydantic_extra__`` and are re-emitted by the assembler.
     model_config = ConfigDict(extra="allow")
     persistence: str | None = None
@@ -73,13 +73,13 @@ class _CodexHistory(BaseModel):
 
 
 class _CodexOtel(BaseModel):
-    """Wave-10 §15.x — slice of ``[otel]`` claimed by this codec.
+    """slice of ``[otel]`` claimed by this codec.
 
     Only the ``exporter`` arm is claimed today; the rest of
     ``OtelConfigToml`` (``environment`` / ``log_user_prompt`` /
     ``metrics_exporter`` / ``trace_exporter``) is unmodelled here, and
     ``extra="allow"`` keeps any such keys round-tripping through
-    ``__pydantic_extra__`` (Wave-5 B1).
+    ``__pydantic_extra__``.
     """
 
     model_config = ConfigDict(extra="allow")
@@ -89,7 +89,7 @@ class _CodexOtel(BaseModel):
 class CodexLifecycleSection(BaseModel):
     model_config = ConfigDict(extra="allow")
     history: _CodexHistory = Field(default_factory=_CodexHistory)
-    # Wave-10 §15.x — telemetry.exporter (and endpoint) live under [otel].
+    # telemetry.exporter (and endpoint) live under [otel].
     otel: _CodexOtel | None = None
 
 
@@ -101,7 +101,7 @@ class CodexLifecycleCodec:
         {
             FieldPath(segments=("history", "persistence")),
             FieldPath(segments=("history", "max_bytes")),
-            # Wave-10 §15.x — telemetry.exporter:
+            # telemetry.exporter:
             FieldPath(segments=("otel", "exporter")),
         }
     )
@@ -118,7 +118,7 @@ class CodexLifecycleCodec:
                 LossWarning(
                     domain=Domains.LIFECYCLE,
                     target=BUILTIN_CODEX,
-                    message="lifecycle.cleanup_period_days has no Codex equivalent (§15.2)",
+                    message="lifecycle.cleanup_period_days has no Codex equivalent",
                 )
             )
         if _hooks_has_any_event(model.hooks):
@@ -127,13 +127,13 @@ class CodexLifecycleCodec:
                     domain=Domains.LIFECYCLE,
                     target=BUILTIN_CODEX,
                     message=(
-                        "lifecycle.hooks not propagated to Codex (P1-B): Codex "
+                        "lifecycle.hooks not propagated to Codex: Codex "
                         "does not currently expose a hooks ABI; a real Codex "
                         "hooks codec lands once upstream publishes a schema"
                     ),
                 )
             )
-        # Wave-10 §15.x — telemetry.exporter ↔ [otel].exporter.
+        # telemetry.exporter ↔ [otel].exporter.
         exporter = _telemetry_exporter_to_codex(model.telemetry, ctx)
         if exporter is not None:
             section.otel = _CodexOtel(exporter=exporter)
@@ -157,7 +157,7 @@ class CodexLifecycleCodec:
                 )
         if section.history.max_bytes is not None:
             history.max_bytes = section.history.max_bytes
-        # Wave-10 §15.x — reverse mapping for [otel].exporter.
+        # reverse mapping for [otel].exporter.
         telemetry = (
             _telemetry_exporter_from_codex(section.otel.exporter, ctx)
             if section.otel is not None and section.otel.exporter is not None

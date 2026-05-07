@@ -1,4 +1,4 @@
-"""Wave-13 S2 — Claude authorization codec, LCD-aligned.
+"""S2 — Claude authorization codec, LCD-aligned.
 
 Pins the LCD principle for the Claude side:
 

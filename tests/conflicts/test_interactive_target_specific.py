@@ -1,8 +1,8 @@
-"""Wave-15 W15-B: ``[t]`` target-specific choice + prior-decision rendering.
+"""``[t]`` target-specific choice + prior-decision rendering.
 
 Covers the InteractiveResolver-side surface of the resolution-memory
-spec §6.2 (re-prompt with prior-decision context after a hash drift)
-and §6.3 (the ``[t]`` choice produces a TARGET_SPECIFIC outcome).
+spec (re-prompt with prior-decision context after a hash drift)
+and (the ``[t]`` choice produces a TARGET_SPECIFIC outcome).
 """
 
 from __future__ import annotations

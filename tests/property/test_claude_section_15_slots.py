@@ -1,10 +1,10 @@
-"""Wave-10 §15.x — Claude codec coverage for the 5 unclaimed enum slots.
+"""Claude codec coverage for the 5 unclaimed enum slots.
 
 Sibling agent owns the matching Codex side. This file verifies the
 Claude side only:
 
   1. identity.auth.method (AuthMethod) — full bidirectional map onto
-     Claude's forceLoginMethod (claudeai/console). Wave-11 §15.x
+     Claude's forceLoginMethod (claudeai/console).
      reconciliation shrank AuthMethod from 6 values to 2 after
      confirming neither upstream exposes BEDROCK/VERTEX/AZURE/NONE
      as a login-method enum value, so all remaining values now
@@ -58,7 +58,7 @@ def test_identity_auth_method_round_trips_supported_values(neutral: AuthMethod, 
 
 
 def test_identity_auth_method_enum_reconciled_to_two_values() -> None:
-    """Wave-11 §15.x reconciliation pin: ``AuthMethod`` carries exactly the
+    """reconciliation pin: ``AuthMethod`` carries exactly the
     two values that both upstream login-method enums model.
 
     The original neutral schema had six values (OAUTH/API_KEY/BEDROCK/

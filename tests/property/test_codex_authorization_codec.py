@@ -1,4 +1,4 @@
-"""Wave-13 S3 — Codex authorization LCD codec.
+"""S3 — Codex authorization LCD codec.
 
 Covers the new claims and LossWarning surfaces introduced when the LCD
 schema split arrived in S1:
@@ -198,7 +198,7 @@ def test_codex_encode_no_permission_mode_no_warning() -> None:
 
 
 def test_codex_authorization_claimed_paths_includes_approval_policy() -> None:
-    """Wave-13 S3 wiring: the codec claims ``approval_policy`` so the
+    """S3 wiring: the codec claims ``approval_policy`` so the
     static no-silent-upstream-drops audit credits it as 'claimed'
     (not pass-through). This is the assertion the audit relies on."""
     paths = {p.render() for p in CodexAuthorizationCodec.claimed_paths}

@@ -49,7 +49,7 @@ class CodexGovernanceCodec:
         # Detect duplicate paths within either list. The wire shape
         # (``projects.<path>.trust_level`` keyed by path string) cannot
         # represent duplicates — a second occurrence collapses onto the
-        # first dict slot. Surface the loss explicitly per A-TRUST.
+        # first dict slot. Surface the loss explicitly.
         trusted_dupes = sorted(
             {p for p in model.trust.trusted_paths if model.trust.trusted_paths.count(p) > 1}
         )
@@ -62,7 +62,7 @@ class CodexGovernanceCodec:
                     domain=Domains.GOVERNANCE,
                     target=BUILTIN_CODEX,
                     message=(
-                        "A-TRUST: Trust.duplicate_paths — Codex `projects.<path>` "
+                        "Trust.duplicate_paths — Codex `projects.<path>` "
                         "is keyed by path string, so duplicate entries within a "
                         "trust list collapse to a single wire key; "
                         f"trusted_paths duplicates={trusted_dupes!r}, "
@@ -85,7 +85,7 @@ class CodexGovernanceCodec:
                     domain=Domains.GOVERNANCE,
                     target=BUILTIN_CODEX,
                     message=(
-                        "A-TRUST: Trust.both_trusted_and_untrusted — paths appear "
+                        "Trust.both_trusted_and_untrusted — paths appear "
                         "in both trusted_paths and untrusted_paths; Codex stores "
                         "a single trust_level per path, so untrusted_paths wins "
                         f"(serialised last); paths={both!r}"

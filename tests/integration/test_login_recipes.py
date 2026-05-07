@@ -330,7 +330,7 @@ def test_zlogin_chameleon_invocations_use_live_cli_flags() -> None:
 # --------------------------------------------------------------------------- #
 
 
-_VALID_ON_CONFLICT_BARE = {"fail", "keep", "prefer-neutral", "prefer-lkg"}
+_VALID_ON_CONFLICT_BARE = {"fail", "latest", "keep", "prefer-neutral", "prefer-lkg"}
 
 
 def _every_recipe_merge_argv() -> list[tuple[str, list[str]]]:

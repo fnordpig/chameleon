@@ -21,7 +21,7 @@ class Verbosity(Enum):
 
 
 class Personality(StrEnum):
-    """Fixed-vocabulary personality selector for the agent (P1-E).
+    """Fixed-vocabulary personality selector for the agent.
 
     Mirrors Codex's upstream-canonized ``Personality`` enum exactly.
     Modelled as a fixed enum rather than a free string because Codex

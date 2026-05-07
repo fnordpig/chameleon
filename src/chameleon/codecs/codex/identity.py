@@ -4,15 +4,15 @@ Maps:
   reasoning_effort   -> model_reasoning_effort  (minimal/low/medium/high/xhigh)
   model[codex]       -> model
   thinking           -> n/a in Codex (LossWarning if set)
-  auth.method        -> forced_login_method (Wave-10 §15.x)
+  auth.method        -> forced_login_method ()
 
-P1-F — Codex-only identity tuning knobs (claimed here; no analogue in Claude):
+Codex-only identity tuning knobs (claimed here; no analogue in Claude):
   context_window     -> model_context_window
   compact_threshold  -> model_auto_compact_token_limit
   model_catalog_path -> model_catalog_json
 
-Wave-10 §15.x — auth.method:
-  After Wave-11 §15.x reconciliation, neutral ``AuthMethod`` is the
+auth.method:
+  After  reconciliation, neutral ``AuthMethod`` is the
   same 2-element domain as Codex's upstream ``ForcedLoginMethod``:
   ``OAUTH ↔ chatgpt`` and ``API_KEY ↔ api``. Both values round-trip
   cleanly with no LossWarning on encode. The historical 5-value
@@ -28,6 +28,7 @@ each field exactly (subject to the int/str types declared on the section).
 
 from __future__ import annotations
 
+import os
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
@@ -38,7 +39,7 @@ from chameleon.codecs.codex._generated import ForcedLoginMethod
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.identity import AuthMethod, Identity, IdentityAuth, ReasoningEffort
 
-# Wave-10 §15.x — auth.method bidirectional mapping. Only OAUTH and
+# auth.method bidirectional mapping. Only OAUTH and
 # API_KEY have Codex equivalents; the other neutral values emit a
 # LossWarning at ``to_target`` time. Stored as enum-keyed dicts so a
 # future upstream rename of ``ForcedLoginMethod`` fails typing here
@@ -57,13 +58,13 @@ class CodexIdentitySection(BaseModel):
     model_config = ConfigDict(extra="allow")
     model: str | None = None
     model_reasoning_effort: str | None = None
-    # P1-F — Codex-only identity tuning knobs. Field names mirror the
+    # Codex-only identity tuning knobs. Field names mirror the
     # upstream Codex config.toml keys exactly so the assembler can splat
     # via `model_dump(exclude_none=True)`.
     model_context_window: int | None = None
     model_auto_compact_token_limit: int | None = None
     model_catalog_json: str | None = None
-    # Wave-10 §15.x — auth.method ↔ forced_login_method. Stored as the raw
+    # auth.method ↔ forced_login_method. Stored as the raw
     # wire string (not the upstream ``ForcedLoginMethod`` enum) so an
     # unrecognized value disassembled from live config can land in the
     # section, hit ``from_target``, and emit a typed ``LossWarning``
@@ -84,7 +85,7 @@ class CodexIdentityCodec:
             FieldPath(segments=("model_context_window",)),
             FieldPath(segments=("model_auto_compact_token_limit",)),
             FieldPath(segments=("model_catalog_json",)),
-            # Wave-10 §15.x — auth.method:
+            # auth.method:
             FieldPath(segments=("forced_login_method",)),
         }
     )
@@ -117,14 +118,14 @@ class CodexIdentityCodec:
                     message="identity.thinking has no Codex equivalent; not propagating",
                 )
             )
-        # P1-F — Codex-only identity tuning knobs. Lossless on Codex.
+        # Codex-only identity tuning knobs. Lossless on Codex.
         if model.context_window is not None:
             section.model_context_window = model.context_window
         if model.compact_threshold is not None:
             section.model_auto_compact_token_limit = model.compact_threshold
         if model.model_catalog_path is not None:
-            section.model_catalog_json = model.model_catalog_path
-        # Wave-10 §15.x — auth.method ↔ forced_login_method.
+            section.model_catalog_json = os.path.expanduser(model.model_catalog_path)
+        # auth.method ↔ forced_login_method.
         if model.auth.method is not None:
             mapped = _AUTH_METHOD_TO_CODEX.get(model.auth.method)
             if mapped is None:
@@ -163,14 +164,14 @@ class CodexIdentityCodec:
                 )
         if section.model is not None:
             ident.model = {BUILTIN_CODEX: section.model}
-        # P1-F — reverse mapping for Codex-only identity tuning knobs.
+        # reverse mapping for Codex-only identity tuning knobs.
         if section.model_context_window is not None:
             ident.context_window = section.model_context_window
         if section.model_auto_compact_token_limit is not None:
             ident.compact_threshold = section.model_auto_compact_token_limit
         if section.model_catalog_json is not None:
             ident.model_catalog_path = section.model_catalog_json
-        # Wave-10 §15.x — reverse mapping for forced_login_method.
+        # reverse mapping for forced_login_method.
         if section.forced_login_method is not None:
             try:
                 upstream = ForcedLoginMethod(section.forced_login_method)

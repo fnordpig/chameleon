@@ -40,10 +40,10 @@ def test_identity_reasoning_effort_target_shared_scalar() -> None:
 
 
 def test_auth_method_enum() -> None:
-    # Wave-11 §15.x reconciliation shrank AuthMethod from 5 values to 2
+    #  reconciliation shrank AuthMethod from 5 values to 2
     # after confirming neither upstream login-method enum supports
     # bedrock/vertex/azure. See docs/superpowers/specs/2026-05-06-parity-gap.md
-    # ("Wave-11 §15.x schema reconciliation") for rationale.
+    # (" schema reconciliation") for rationale.
     assert {a.value for a in AuthMethod} == {"oauth", "api-key"}
 
 

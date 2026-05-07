@@ -3,14 +3,14 @@
 V0 thin slice (only fields the schemastore.org Claude schema models):
   fullscreen           ↔ tui ("fullscreen" | "default")
   status_line_command  ↔ statusLine.command
-  voice (P1-C)         ↔ voice {enabled, mode} + voiceEnabled (legacy)
+  voice         ↔ voice {enabled, mode} + voiceEnabled (legacy)
   motion_reduced       ↔ prefersReducedMotion
 
 `interface.editor_mode` and `interface.notification_channel` are
 documented in the design dossier but are not in schemastore.org's
 published schema yet — operators who set them get a LossWarning.
 
-P1-C — voice as a structured object
+voice as a structured object
 -----------------------------------
 The exemplar at ``tests/fixtures/exemplar/home/_claude/settings.json``
 carries BOTH a ``voiceEnabled: bool`` (documented in the upstream JSON
@@ -50,7 +50,7 @@ from chameleon.schema.interface import Interface, Voice, VoiceMode
 
 
 class _ClaudeStatusLine(BaseModel):
-    # F1 (Wave-7): the assembler dumps interface sections with
+    # F1: the assembler dumps interface sections with
     # ``exclude_defaults=True``, which previously stripped a
     # ``type="command"`` default during round-trip — even when the
     # exemplar literally shipped ``{"type": "command", ...}``. Default
@@ -78,7 +78,7 @@ class _ClaudeVoice(BaseModel):
 
 
 class ClaudeInterfaceSection(BaseModel):
-    # ``extra="allow"`` (B1) — unclaimed top-level keys round-trip
+    # ``extra="allow"`` — unclaimed top-level keys round-trip
     # through ``__pydantic_extra__`` and are re-emitted by the
     # assembler.
     model_config = ConfigDict(extra="allow")

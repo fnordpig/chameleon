@@ -1,8 +1,8 @@
-"""Wave-11 F-CWD regression — Claude MCP stdio carries ``cwd``.
+"""F-CWD regression — Claude MCP stdio carries ``cwd``.
 
 The neutral schema's :class:`~chameleon.schema.capabilities.McpServerStdio`
 exposes a first-class ``cwd: str | None`` field (working directory for the
-spawned MCP stdio server). Wave-9 Agent B's cross-target fuzzer pinned
+spawned MCP stdio server).  Agent B's cross-target fuzzer pinned
 the silent loss as F-CWD in
 :mod:`tests.fuzz.test_cross_target_unification` — the Claude codec's
 ``_ClaudeMcpServerStdio`` did not model ``cwd``, so encoding through

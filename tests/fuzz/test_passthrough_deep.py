@@ -1,6 +1,6 @@
-"""Wave-9 FUZZ-4 — pass-through preservation at adversarial nesting depths.
+"""FUZZ-4 — pass-through preservation at adversarial nesting depths.
 
-Wave-5 B1 (sub-table extras via ``__pydantic_extra__``) and Wave-7 F2
+ B1 (sub-table extras via ``__pydantic_extra__``) and  F2
 (typed-default rountrip) fixed pass-through preservation for the cases
 the B1/F2 regression tests cover.  This module pushes the same invariant
 into the corners those targeted tests don't reach: arbitrary unknown
@@ -14,13 +14,13 @@ keys spliced at random depths inside the wire-form of both Claude
   * inside doubly-nested sub-tables such as
     ``[tui.model_availability_nux]`` and ``[history.<future_subtable>]``.
 
-The contract this fuzz test pins is identical to the one Wave-5/7 stated
+The contract this fuzz test pins is identical to the one /7 stated
 in prose: every unknown key the operator wrote into the live target
 file must come back out of ``assemble(disassemble(file))``, byte-shape
 permitting (we test by parsing the output and walking it).  If a single
 preservation failure is found, the test fails with a Hypothesis
 counter-example showing the splice path and the dropped key — that is a
-Wave-11 regression of B1/F2 class.
+ regression of B1/F2 class.
 
 Constraints (from the FUZZ-4 task spec):
 
@@ -68,7 +68,7 @@ pytestmark = pytest.mark.fuzz
 # dict-of-tables (we draw a random key name when generating).
 #
 # The catalogue intentionally covers each of the four preservation
-# axes Wave-5/7 fixed:
+# axes /7 fixed:
 #   - top-level (the empty path ``()``),
 #   - inside a claimed section (e.g. ``("tui",)``),
 #   - inside a dict-of-tables entry (``("mcpServers", "<dict_value>")``),
@@ -452,13 +452,13 @@ def test_claude_passthrough_preservation_at_random_depth(
         assert bucket is not None, (
             f"path {path!r} disappeared from settings.json round-trip; "
             f"expected key {key!r} unreachable.  This is a B1/F2-class "
-            f"regression — report as Wave-11 finding."
+            f"regression — report as  finding."
         )
         assert key in bucket, (
             f"unknown key {key!r} dropped at path {path!r} during "
             f"Claude disassemble/assemble round-trip.  Bucket keys: "
             f"{sorted(bucket.keys())!r}.  This is a B1/F2-class regression "
-            f"— report as Wave-11 finding."
+            f"— report as  finding."
         )
 
 
@@ -521,13 +521,13 @@ def test_codex_passthrough_preservation_at_random_depth(
         assert bucket is not None, (
             f"path {path!r} disappeared from config.toml round-trip; "
             f"expected key {key!r} unreachable.  This is a B1/F2-class "
-            f"regression — report as Wave-11 finding."
+            f"regression — report as  finding."
         )
         assert key in bucket, (
             f"unknown key {key!r} dropped at path {path!r} during "
             f"Codex disassemble/assemble round-trip.  Bucket keys: "
             f"{sorted(bucket.keys())!r}.  This is a B1/F2-class regression "
-            f"— report as Wave-11 finding."
+            f"— report as  finding."
         )
 
 

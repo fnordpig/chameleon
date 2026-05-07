@@ -2,7 +2,7 @@
 
 Maps:
   variables ↔ [shell_environment_policy].set
-  inherit   ↔ [shell_environment_policy].inherit (Wave-10 §15.x)
+  inherit   ↔ [shell_environment_policy].inherit ()
 
 The neutral ``InheritPolicy`` enum (``all``/``core``/``none``) was chosen
 to mirror Codex's ``ShellEnvironmentPolicyInherit`` RootModel union
@@ -23,13 +23,13 @@ from chameleon.schema.environment import Environment, InheritPolicy
 
 
 class _CodexShellEnvPolicy(BaseModel):
-    # ``extra="allow"`` (B1) — Codex's shell_environment_policy supports
+    # ``extra="allow"`` — Codex's shell_environment_policy supports
     # additional knobs (e.g. ``ignore_default_excludes``,
     # ``include_only``) that we don't model in V0; preserve them through
     # round-trip via ``__pydantic_extra__``.
     model_config = ConfigDict(extra="allow")
     set: dict[str, str] = Field(default_factory=dict)
-    # Wave-10 §15.x — environment.inherit ↔ shell_environment_policy.inherit.
+    # environment.inherit ↔ shell_environment_policy.inherit.
     # Stored as the raw wire string (not the upstream
     # ``ShellEnvironmentPolicyInherit`` RootModel) so an unrecognized value
     # disassembled from live config can land in the section, hit
@@ -44,7 +44,7 @@ class CodexEnvironmentSection(BaseModel):
     shell_environment_policy: _CodexShellEnvPolicy = Field(default_factory=_CodexShellEnvPolicy)
 
 
-# Wave-10 §15.x — bidirectional value-by-value mapping. The neutral
+# bidirectional value-by-value mapping. The neutral
 # ``InheritPolicy`` enum mirrors the Codex wire vocabulary exactly so a
 # future upstream rename fails typing here, not silently at runtime.
 _INHERIT_TO_CODEX: dict[InheritPolicy, str] = {
@@ -66,7 +66,7 @@ class CodexEnvironmentCodec:
     claimed_paths: ClassVar[frozenset[FieldPath]] = frozenset(
         {
             FieldPath(segments=("shell_environment_policy", "set")),
-            # Wave-10 §15.x:
+            # :
             FieldPath(segments=("shell_environment_policy", "inherit")),
         }
     )

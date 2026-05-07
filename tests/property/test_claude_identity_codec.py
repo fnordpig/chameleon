@@ -47,7 +47,7 @@ def test_claude_identity_section_is_typed_subset() -> None:
         cur: type = ClaudeIdentitySection
         for seg in path.segments:
             # Section fields may use the wire key as a Pydantic alias when
-            # the Python attribute name is snake_case (Wave-10 §15.x's
+            # the Python attribute name is snake_case ('s
             # ``forceLoginMethod`` / ``apiKeyHelper`` paths). Resolve by
             # alias too — same rule the schema-drift gate enforces.
             field = cur.model_fields.get(seg)

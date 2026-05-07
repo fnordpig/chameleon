@@ -1,4 +1,4 @@
-"""Login-time conflict notices (§9.4)."""
+"""Login-time conflict notices."""
 
 from __future__ import annotations
 

@@ -1,26 +1,26 @@
-"""Wave-6 golden round-trip on the sanitized exemplar.
+"""golden round-trip on the sanitized exemplar.
 
 The smoke (`tests/integration/test_exemplar_smoke.py`) verifies
 *behavioural* properties — exit codes, key preservation, conflict
-detection. Wave-6 is stronger: after `chameleon init` +
+detection.  is stronger: after `chameleon init` +
 `chameleon merge --on-conflict=keep` against the exemplar, the live
 target files must round-trip *modulo a small, documented set of
 intentional transforms*.
 
 Documented transforms (the "modulo X" allow-list):
 
-* **P1-D — legacy attribution alias consolidation.** The three legacy
+* **legacy attribution alias consolidation.** The three legacy
   bools in Claude `settings.json` (``includeCoAuthoredBy``,
   ``coauthoredBy``, ``gitAttribution``) collapse to a single
   ``attribution.commit`` entry.
 * **B2 — sorted-by-key dict ordering.** Plugin and marketplace dicts
   are emitted alphabetically (the fix that gave us byte-stable
-  idempotency in Wave-5).
+  idempotency in ).
 * **B4 — non-ASCII preservation.** Non-ASCII codepoints written via
   partial-owned paths now route through `dump_json(ensure_ascii=False)`,
   so a literal ``—`` may replace ``\\u2014`` (or vice-versa); the
   *parsed* value must be identical.
-* **P1-A — capabilities reconciliation.** Plugin enable-state and
+* **capabilities reconciliation.** Plugin enable-state and
   marketplaces are unioned across targets, so Codex `[plugins.*]`
   may grow keys that were originally only in Claude
   ``enabledPlugins`` (and vice-versa). Same for marketplaces.
@@ -28,13 +28,13 @@ Documented transforms (the "modulo X" allow-list):
   ``[shell_environment_policy.set]`` (Codex) appear when neutral
   has no environment configured.
 
-Anything outside that allow-list is a Wave-7 finding. Two such
+Anything outside that allow-list is a  finding. Two such
 findings already surface here (F1 and F2 below); both are pinned as
 ``xfail(strict=True)`` so the failure mode is visible in CI but
 doesn't block the green build, and the moment they are fixed pytest
 will flip them to passing automatically.
 
-Wave-7 findings (xfail-pinned):
+ findings (xfail-pinned):
 
 * **F1 — `statusLine.type` dropped on Claude `settings.json`.** The
   exemplar ships ``"statusLine": {"type": "command", "command": ...}``.
@@ -76,7 +76,7 @@ REPO = Path(__file__).resolve().parent.parent.parent
 FIXTURE_HOME = REPO / "tests" / "fixtures" / "exemplar" / "home"
 
 # Top-level keys in Claude settings.json that the legacy-attribution
-# consolidation (P1-D) is allowed to remove from the original.
+# consolidation is allowed to remove from the original.
 _LEGACY_ATTRIBUTION_ALIASES: frozenset[str] = frozenset(
     {"includeCoAuthoredBy", "coauthoredBy", "gitAttribution"}
 )
@@ -138,18 +138,18 @@ def _toml_to_plain(value: Any) -> Any:
 
 
 def _normalize_claude_settings(raw: dict[str, Any]) -> dict[str, Any]:
-    """Apply the documented Wave-5 transforms to a Claude settings dict.
+    """Apply the documented  transforms to a Claude settings dict.
 
     Run on BOTH the pre-image and post-image; if the normalised forms
-    differ, the discrepancy is real round-trip drift (a Wave-7 finding
-    not yet pinned). The currently-pinned Wave-7 findings (F1, F2)
+    differ, the discrepancy is real round-trip drift (a  finding
+    not yet pinned). The currently-pinned  findings (F1, F2)
     are ALSO normalised away here so the main full-roundtrip test
     asserts only on novel drift; F1 and F2 have their own dedicated
     xfail-pinned tests below.
     """
     out = dict(raw)
 
-    # P1-D: collapse legacy attribution aliases. We don't try to
+    # collapse legacy attribution aliases. We don't try to
     # reconstruct ``attribution.commit`` from the aliases here; we just
     # accept that the post-image has the canonical form and the
     # pre-image had aliases. Drop both sides' attribution-related keys
@@ -163,7 +163,7 @@ def _normalize_claude_settings(raw: dict[str, Any]) -> dict[str, Any]:
     if out.get("env") == {}:
         out.pop("env")
 
-    # F1 (Wave-7 pinned): ``statusLine.type`` is dropped during
+    # F1 ( pinned): ``statusLine.type`` is dropped during
     # round-trip. Strip the ``type`` key on both sides so the main
     # roundtrip assertion ignores this axis; the dedicated F1 test
     # below pins the actual finding.
@@ -172,7 +172,7 @@ def _normalize_claude_settings(raw: dict[str, Any]) -> dict[str, Any]:
         sl.pop("type", None)
         out["statusLine"] = sl
 
-    # P1-A: ``enabledPlugins`` is reconciled (unioned) with the Codex
+    # ``enabledPlugins`` is reconciled (unioned) with the Codex
     # ``[plugins.*]`` table, so Claude may gain entries that originally
     # lived only in Codex (and vice-versa). Compare key *sets* and
     # individual values, but ignore key ordering. The full-roundtrip
@@ -185,9 +185,9 @@ def _normalize_claude_settings(raw: dict[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_codex_config(raw: dict[str, Any]) -> dict[str, Any]:
-    """Apply the documented Wave-5 transforms to a Codex config dict.
+    """Apply the documented  transforms to a Codex config dict.
 
-    F2 (Wave-7 pinned) is handled by dropping per-marketplace
+    F2 ( pinned) is handled by dropping per-marketplace
     sub-keys before comparison; the dedicated F2 test below pins
     the actual finding.
     """
@@ -206,7 +206,7 @@ def _normalize_codex_config(raw: dict[str, Any]) -> dict[str, Any]:
         if k in out and isinstance(out[k], dict):
             out[k] = {kk: out[k][kk] for kk in sorted(out[k])}
 
-    # F2 (Wave-7 pinned): per-marketplace ``last_updated`` and
+    # F2 ( pinned): per-marketplace ``last_updated`` and
     # ``last_revision`` cache state is dropped during round-trip.
     # Strip those keys on both sides so the main roundtrip assertion
     # ignores this axis.
@@ -235,7 +235,7 @@ def test_exemplar_full_roundtrip_preserves_semantic_content(
     exemplar_env: dict[str, Path],
 ) -> None:
     """After init+merge, the live config files must equal the exemplar
-    modulo the documented Wave-5 transforms (P1-D, P1-A, B2, B4, and
+    modulo the documented  transforms (P1-D, P1-A, B2, B4, and
     the two cosmetic empties).
     """
     home = exemplar_env["home"]
@@ -265,7 +265,7 @@ def test_exemplar_full_roundtrip_preserves_semantic_content(
 
     # Claude settings.json: deep-equal modulo documented normalisation.
     assert _normalize_claude_settings(post_settings) == _normalize_claude_settings(pre_settings), (
-        "Claude settings.json drifted beyond documented exceptions; this is a Wave-7 finding."
+        "Claude settings.json drifted beyond documented exceptions; this is a  finding."
     )
 
     # P1-A union of marketplaces / plugins is allowed to ADD entries
@@ -301,14 +301,14 @@ def test_exemplar_full_roundtrip_preserves_semantic_content(
             assert norm_post[k][entry_k] == entry_v, (
                 f"Codex [{k}.{entry_k}] sub-table content drifted: "
                 f"pre={entry_v!r} post={norm_post[k][entry_k]!r} "
-                "(this is the Wave-7 sub-table-extras finding F2 if "
+                "(this is the  sub-table-extras finding F2 if "
                 "the missing keys are last_updated/last_revision)"
             )
         norm_pre.pop(k, None)
         norm_post.pop(k, None)
     # `projects` is not unioned; should be exact.
     assert norm_post == norm_pre, (
-        "Codex config.toml drifted beyond documented exceptions; this is a Wave-7 finding."
+        "Codex config.toml drifted beyond documented exceptions; this is a  finding."
     )
 
 
@@ -318,7 +318,7 @@ def test_exemplar_full_roundtrip_preserves_semantic_content(
 
 
 def test_exemplar_idempotency_byte_stable(exemplar_env: dict[str, Path]) -> None:
-    """Wave-5 B2 closed dict-ordering instability. Two consecutive
+    """B2 closed dict-ordering instability. Two consecutive
     keep-merges against the exemplar must produce byte-identical
     target files.
     """
@@ -344,7 +344,7 @@ def test_exemplar_idempotency_byte_stable(exemplar_env: dict[str, Path]) -> None
 
 
 # --------------------------------------------------------------------------
-# 3. Non-ASCII codepoint preservation (B4)
+# 3. Non-ASCII codepoint preservation
 # --------------------------------------------------------------------------
 
 
@@ -380,17 +380,17 @@ def test_exemplar_full_unicode_preserved(exemplar_env: dict[str, Path]) -> None:
 
 
 # --------------------------------------------------------------------------
-# 4. Pass-through bag should be empty after Wave-4 closed every codec
+# 4. Pass-through bag should be empty after  closed every codec
 # --------------------------------------------------------------------------
 
 
 def test_exemplar_zero_unexpected_passthrough(exemplar_env: dict[str, Path]) -> None:
-    """After Wave-4, every claimed key has a codec; therefore the
+    """After , every claimed key has a codec; therefore the
     exemplar should produce an empty ``targets.<target>.items``
     pass-through bag in neutral.yaml.
 
     If any keys leak in, list them — that's the codec that missed
-    something during Wave-4 closure.
+    something during  closure.
     """
     _init_and_merge(exemplar_env)
     neutral = exemplar_env["config"] / "chameleon" / "neutral.yaml"
@@ -417,12 +417,12 @@ def test_exemplar_zero_unexpected_passthrough(exemplar_env: dict[str, Path]) -> 
 
 
 # --------------------------------------------------------------------------
-# 5. Pinned Wave-7 findings — strict xfail until fixed.
+# 5. Pinned  findings — strict xfail until fixed.
 # --------------------------------------------------------------------------
 
 
 def test_wave7_f1_status_line_type_preserved(exemplar_env: dict[str, Path]) -> None:
-    """Wave-7 F1: ``statusLine.type`` survives round-trip.
+    """F1: ``statusLine.type`` survives round-trip.
 
     Previously dropped because ``_ClaudeStatusLine.type`` carried a
     default of ``"command"`` and the assembler dumps interface sections
@@ -448,7 +448,7 @@ def test_wave7_f1_status_line_type_preserved(exemplar_env: dict[str, Path]) -> N
 def test_wave7_f2_codex_marketplace_extras_preserved(
     exemplar_env: dict[str, Path],
 ) -> None:
-    """Wave-7 F2: Codex ``[marketplaces.<name>]`` per-entry extras survive.
+    """F2: Codex ``[marketplaces.<name>]`` per-entry extras survive.
 
     ``last_updated`` / ``last_revision`` (and any other Codex-side
     cache state) are no longer modeled on ``_CodexMarketplaceEntry``;

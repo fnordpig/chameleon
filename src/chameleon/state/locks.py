@@ -1,4 +1,4 @@
-"""Partial-ownership write discipline (§10.5)."""
+"""Partial-ownership write discipline."""
 
 from __future__ import annotations
 
@@ -69,7 +69,7 @@ def partial_owned_write(
         # Route through io.json.dump_json so the partial-owned-write path
         # honours the same `ensure_ascii=False` contract as full-owned
         # writes — non-ASCII content (em-dashes, smart quotes, emoji,
-        # multilingual user content) survives round-trip. (B4)
+        # multilingual user content) survives round-trip.
         tmp.write_text(dump_json(merged, indent=2), encoding="utf-8")
         tmp.replace(path)
 

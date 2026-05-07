@@ -21,12 +21,12 @@ from chameleon.schema.passthrough import PassThroughBag
 from chameleon.schema.profiles import Profile
 
 # Schema version is closed-vocabulary: only known versions parse. Bumping
-# requires an explicit migration spec (§15.10).
+# requires an explicit migration spec.
 SchemaVersion = Literal[1]
 
 
 class ResolutionDecisionKind(StrEnum):
-    """How an operator resolved a conflict (resolution-memory spec §1).
+    """How an operator resolved a conflict (resolution-memory spec ).
 
     Persisted in ``Neutral.resolutions`` so the engine can replay the
     operator's decision on subsequent merges instead of re-prompting.
@@ -49,7 +49,7 @@ class ResolutionDecisionKind(StrEnum):
 
 
 class Resolution(BaseModel):
-    """One operator decision keyed by ``FieldPath.render()`` (§1).
+    """One operator decision keyed by ``FieldPath.render()``.
 
     ``decision_hash`` captures the (N₀, N₁, per_target) shape the operator
     decided over; on the next merge the engine recomputes the hash from
@@ -65,7 +65,7 @@ class Resolution(BaseModel):
 
 
 class Resolutions(BaseModel):
-    """Persisted operator decisions (§1).
+    """Persisted operator decisions.
 
     Keyed by ``FieldPath.render()``-with-discriminators (e.g.
     ``identity.model[claude]`` or
@@ -107,7 +107,7 @@ class Neutral(BaseModel):
     # Per-target pass-through.
     targets: dict[TargetId, PassThroughBag] = Field(default_factory=dict)
 
-    # Persisted operator conflict decisions (resolution-memory spec §1).
+    # Persisted operator conflict decisions (resolution-memory spec ).
     resolutions: Resolutions = Field(default_factory=Resolutions)
 
 

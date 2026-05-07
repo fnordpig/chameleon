@@ -1,6 +1,6 @@
 """Resolution-memory helpers: hashing, path parsing, GC.
 
-The resolution-memory spec (§1) records operator conflict decisions
+The resolution-memory spec records operator conflict decisions
 keyed by ``FieldPath.render()``-with-discriminators (the same string
 ``ChangeRecord.render_path()`` produces). On the next merge the engine
 recomputes a stable hash over ``(n0, n1, per_target)`` and silently
@@ -83,7 +83,7 @@ def parse_resolution_key(key: str) -> ParsedResolutionKey:
 
 
 def compute_decision_hash(record: ChangeRecord) -> str:
-    """Stable invalidation hash over ``(n0, n1, per_target)`` (§1).
+    """Stable invalidation hash over ``(n0, n1, per_target)``.
 
     Uses ``_serialize`` (already used by the change-walker) so the hash
     is computed over the same JSON-mode shape the classifier compares.

@@ -1,6 +1,6 @@
 """governance domain — rules about rules (managed config, trust, updates).
 
-V0: typed schema only; codecs deferred (§15.4).
+V0: typed schema only; codecs deferred.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ class Trust(BaseModel):
       write order (trusted first, then untrusted overwrites the same
       ``[projects."<path>"]`` table) — picking the same precedence in
       neutral makes the engine's classify/compose/re-derive flow
-      idempotent on adversarial inputs that the Wave-9 state-machine
+      idempotent on adversarial inputs that the  state-machine
       fuzz surfaces.
 
     The canonicalisation is silent (no warnings emitted): operators who

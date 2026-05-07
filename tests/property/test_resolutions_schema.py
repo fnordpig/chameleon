@@ -1,4 +1,4 @@
-"""Schema-level tests for the Wave-15 resolution-memory types.
+"""Schema-level tests for the  resolution-memory types.
 
 Covers:
 - ``ResolutionDecisionKind`` enum vocabulary matches the spec.
@@ -31,7 +31,7 @@ from chameleon.schema.passthrough import PassThroughBag
 
 
 def test_resolution_decision_kind_vocabulary() -> None:
-    """Spec §1 names exactly five decision kinds; values are stable strings."""
+    """Spec names exactly five decision kinds; values are stable strings."""
     assert {k.value for k in ResolutionDecisionKind} == {
         "take_neutral",
         "take_lkg",
@@ -96,7 +96,7 @@ def test_neutral_round_trip_preserves_resolutions() -> None:
 
 
 def test_resolver_outcome_persist_default_true() -> None:
-    """Interactive resolvers persist by default — spec §3."""
+    """Interactive resolvers persist by default — spec."""
     o = ResolverOutcome(decision=ResolutionDecisionKind.TAKE_NEUTRAL, value="x")
     assert o.persist is True
 
@@ -124,7 +124,7 @@ def test_resolver_outcome_round_trip() -> None:
 
 
 def test_passthrough_bag_target_specific_default_empty() -> None:
-    """``PassThroughBag.target_specific`` is the new per-target slot (§2.2)."""
+    """``PassThroughBag.target_specific`` is the new per-target slot."""
     bag = PassThroughBag()
     assert bag.target_specific == {}
     bag2 = PassThroughBag.model_validate(

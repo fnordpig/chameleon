@@ -4,18 +4,18 @@ Maps neutral.identity ↔ Claude settings.json keys:
   reasoning_effort   -> effortLevel  (low/medium/high/xhigh)
   thinking           -> alwaysThinkingEnabled
   model[claude]      -> model
-  auth.method        -> forceLoginMethod  (Wave-10 §15.x slot, partial)
-  auth.api_key_helper -> apiKeyHelper     (Wave-10 §15.x adjacent slot)
+  auth.method        -> forceLoginMethod  ( slot, partial)
+  auth.api_key_helper -> apiKeyHelper     ( adjacent slot)
 
-Wave-10 §15.x — ``identity.auth.method`` is fully supported on Claude
-after Wave-11 §15.x reconciliation. Claude's wire enum
+``identity.auth.method`` is fully supported on Claude
+after  reconciliation. Claude's wire enum
 ``ForceLoginMethod`` (``_generated.py``) is a 2-element StrEnum and
 the neutral ``AuthMethod`` is now also two values:
   * ``oauth``   ↔ ``claudeai`` (OAuth into Claude.ai / Pro / Max)
   * ``api-key`` ↔ ``console``  (API-key billing flow into Console)
 Both values round-trip cleanly. The historical
 ``BEDROCK``/``VERTEX``/``AZURE`` neutral values were removed in
-Wave-11 (see ``schema/identity.py``); those provider lanes are
+ (see ``schema/identity.py``); those provider lanes are
 controlled through per-provider env vars
 (``ANTHROPIC_BEDROCK_BASE_URL``, ``ANTHROPIC_VERTEX_PROJECT_ID``,
 ...), owned by the ``environment`` codec.
@@ -25,7 +25,7 @@ disassembled ``forceLoginMethod`` (a future upstream growing a third
 method before Chameleon regenerates), ``from_target`` emits a typed
 ``LossWarning`` and drops the value rather than crashing.
 
-P1-F — three Codex-only identity tuning knobs have no Claude analogue:
+three Codex-only identity tuning knobs have no Claude analogue:
   context_window, compact_threshold, model_catalog_path
 If any of these is set on the neutral Identity, this codec emits a
 LossWarning naming P1-F (so the operator can see what didn't propagate
@@ -46,7 +46,7 @@ from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.identity import AuthMethod, Identity, IdentityAuth, ReasoningEffort
 
 # Wire bidirectional map for the two AuthMethod values Claude's
-# ``forceLoginMethod`` enum models. After Wave-11 §15.x reconciliation
+# ``forceLoginMethod`` enum models. After  reconciliation
 # AuthMethod itself is also two values, so this map is total over the
 # neutral domain — the ``wire is None`` branch in ``to_target`` is now
 # defensive against a future schema growth (a value added without a
@@ -115,7 +115,7 @@ class ClaudeIdentityCodec:
                         field_path=FieldPath(segments=("model",)),
                     )
                 )
-        # P1-F — Codex-only identity tuning knobs. No Claude analogue;
+        # Codex-only identity tuning knobs. No Claude analogue;
         # warn per field so the operator sees exactly what didn't propagate.
         if model.context_window is not None:
             ctx.warn(
@@ -123,7 +123,7 @@ class ClaudeIdentityCodec:
                     domain=Domains.IDENTITY,
                     target=BUILTIN_CLAUDE,
                     message=(
-                        "P1-F: identity.context_window is a Codex-only tuning "
+                        "identity.context_window is a Codex-only tuning "
                         "knob (model_context_window); not propagating to Claude"
                     ),
                 )
@@ -134,7 +134,7 @@ class ClaudeIdentityCodec:
                     domain=Domains.IDENTITY,
                     target=BUILTIN_CLAUDE,
                     message=(
-                        "P1-F: identity.compact_threshold is a Codex-only tuning "
+                        "identity.compact_threshold is a Codex-only tuning "
                         "knob (model_auto_compact_token_limit); not propagating to Claude"
                     ),
                 )
@@ -145,12 +145,12 @@ class ClaudeIdentityCodec:
                     domain=Domains.IDENTITY,
                     target=BUILTIN_CLAUDE,
                     message=(
-                        "P1-F: identity.model_catalog_path is a Codex-only tuning "
+                        "identity.model_catalog_path is a Codex-only tuning "
                         "knob (model_catalog_json); not propagating to Claude"
                     ),
                 )
             )
-        # Wave-10 §15.x — auth.method translation.
+        # auth.method translation.
         if model.auth.method is not None:
             wire = _AUTH_METHOD_TO_WIRE.get(model.auth.method)
             if wire is not None:
@@ -192,7 +192,7 @@ class ClaudeIdentityCodec:
             ident.thinking = section.alwaysThinkingEnabled
         if section.model is not None:
             ident.model = {BUILTIN_CLAUDE: section.model}
-        # Wave-10 §15.x — auth.method translation (reverse).
+        # auth.method translation (reverse).
         auth = IdentityAuth()
         auth_set = False
         if section.force_login_method is not None:

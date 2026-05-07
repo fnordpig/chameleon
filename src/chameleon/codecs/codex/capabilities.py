@@ -27,7 +27,7 @@ from chameleon.schema.capabilities import (
 
 
 class _CodexMcpServerStdio(BaseModel):
-    # ``extra="allow"`` (B1) — upstream Codex may add fields like
+    # ``extra="allow"`` — upstream Codex may add fields like
     # ``startup_timeout_sec`` per server entry; preserve them through
     # round-trip via ``__pydantic_extra__`` rather than crashing on
     # unknown fields.
@@ -36,14 +36,14 @@ class _CodexMcpServerStdio(BaseModel):
     command: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
-    # F-CWD (Wave-11): Codex's upstream ``RawMcpServerConfig`` (see
+    # Codex's upstream ``RawMcpServerConfig`` (see
     # ``codex-rs/protocol/src/config_types.rs``, mirrored here in
     # ``_generated.py`` as ``cwd: Optional[str]``) carries an optional
     # working-directory field for stdio MCP entries. Without modelling it
     # here, the neutral schema's first-class ``McpServerStdio.cwd``
     # silently dropped through the Codex lane on ``to_target`` /
-    # ``from_target`` — matching the Wave-11 Claude-side fix
-    # (parity/wave11-fcwd-claude-mcp-cwd) closes the round-trip on the
+    # ``from_target`` — matching the  Claude-side fix
+    # closes the round-trip on the
     # Codex half so the cross-target fuzzer's
     # ``test_decode_symmetry_via_cross_target[capabilities.mcp_servers]``
     # and ``test_no_silent_divergence_on_partial_input`` xfails can be
@@ -81,7 +81,7 @@ class _CodexMarketplaceEntry(BaseModel):
     ``source`` / ``source_type`` / ``ref`` are the codec-claimed fields —
     they round-trip through the neutral ``PluginMarketplaceSource`` shape.
 
-    F2 (Wave-7): ``last_updated`` / ``last_revision`` / ``sparse_paths``
+    F2: ``last_updated`` / ``last_revision`` / ``sparse_paths``
     are Codex-side operational state that belongs to the target, not to
     neutral. They are intentionally NOT modeled here — ``extra="allow"``
     routes them into ``__pydantic_extra__`` on disassemble, and the
@@ -92,9 +92,9 @@ class _CodexMarketplaceEntry(BaseModel):
     shape (``dict[str, _CodexMarketplaceEntry]``) and surfaces per-entry
     extras at the right nesting depth.
 
-    Wave-11 F-MP fixes (round-trip preservation):
+     F-MP fixes (round-trip preservation):
 
-    * ``auto_update`` (F-AU) — the neutral ``PluginMarketplace.auto_update``
+    * ``auto_update`` — the neutral ``PluginMarketplace.auto_update``
       flag had no Codex analogue and was previously dropped silently.
       Codex's upstream ``MarketplaceConfig`` is ``extra='allow'``, so we
       can carry the bit through as a plain key on the table; Codex itself
@@ -131,7 +131,7 @@ class CodexCapabilitiesSection(BaseModel):
     mcp_servers: dict[str, _CodexMcpServer] = Field(default_factory=dict)
     plugins: dict[str, _CodexPluginEntry] = Field(default_factory=dict)
     marketplaces: dict[str, _CodexMarketplaceEntry] = Field(default_factory=dict)
-    # Wave-10 §15.x — capabilities.web_search ↔ web_search (top-level
+    # capabilities.web_search ↔ web_search (top-level
     # ``WebSearchMode`` enum on ``ConfigToml``). Vocabulary matches the
     # neutral Literal exactly: ``disabled``/``cached``/``live``.
     web_search: WebSearchMode | None = None
@@ -146,7 +146,7 @@ class CodexCapabilitiesCodec:
             FieldPath(segments=("mcp_servers",)),
             FieldPath(segments=("plugins",)),
             FieldPath(segments=("marketplaces",)),
-            # Wave-10 §15.x:
+            # :
             FieldPath(segments=("web_search",)),
         }
     )
@@ -183,7 +183,7 @@ class CodexCapabilitiesCodec:
             section.marketplaces[mp_name] = _codex_marketplace_from_neutral(
                 mp_name, model.plugin_marketplaces[mp_name], ctx
             )
-        # Wave-10 §15.x — capabilities.web_search ↔ web_search. The Literal
+        # capabilities.web_search ↔ web_search. The Literal
         # vocabulary on the neutral side (``cached``/``live``/``disabled``)
         # was chosen to match Codex's ``WebSearchMode`` exactly, so this is
         # a direct lookup-by-value with no LossWarning paths.
@@ -231,7 +231,7 @@ class CodexCapabilitiesCodec:
             neutral = _codex_marketplace_to_neutral(mp_name, entry, ctx)
             if neutral is not None:
                 marketplaces[mp_name] = neutral
-        # Wave-10 §15.x — reverse mapping for web_search. Pydantic accepts
+        # reverse mapping for web_search. Pydantic accepts
         # the StrEnum instance for the neutral Literal field.
         web_search_value = section.web_search.value if section.web_search is not None else None
         return Capabilities(
@@ -331,7 +331,7 @@ def _codex_marketplace_to_neutral(
             )
         )
         return None
-    # Wave-11 F-MP-G/F-MP-U: if the encoder stashed a Chameleon-namespaced
+    #  F-MP-G/F-MP-U: if the encoder stashed a Chameleon-namespaced
     # neutral-kind hint, recover the original ``PluginMarketplaceSource``
     # shape exactly. Without these, ``github`` would collapse to ``git``
     # (the synthesized HTTPS URL is indistinguishable from a hand-written

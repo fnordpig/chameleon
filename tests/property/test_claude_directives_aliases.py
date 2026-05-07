@@ -1,4 +1,4 @@
-"""P1-D — Claude directives codec must understand the in-the-wild commit
+"""Claude directives codec must understand the in-the-wild commit
 attribution aliases the operator's settings.json actually uses.
 
 Aliases observed in the exemplar fixture (`tests/fixtures/exemplar/home/_claude/settings.json`):

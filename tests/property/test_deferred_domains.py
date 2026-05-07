@@ -21,7 +21,7 @@ from chameleon.schema.lifecycle import History, HistoryPersistence, Lifecycle
 
 
 def test_claude_authorization_round_trip_permission_mode_filesystem_network() -> None:
-    # Wave-13 S2: Claude IS the permission_mode axis (LCD lossless side).
+    #  S2: Claude IS the permission_mode axis (LCD lossless side).
     # ``sandbox_mode`` is now Codex-only — see the LossWarning surface in
     # ``test_claude_authorization_codec.py``.
     orig = Authorization(
@@ -132,7 +132,7 @@ def test_codex_governance_round_trip_features_trust() -> None:
     assert restored.trust.untrusted_paths == ["/tmp/sketchy"]
 
 
-# ---- Trust canonicalisation (Wave-11 D-IDEM regression) ---------------------
+# ---- Trust canonicalisation ( D-IDEM regression) ---------------------
 #
 # The Codex governance codec serialises ``trust.{trusted,untrusted}_paths`` to
 # a path-keyed ``[projects."<path>"].trust_level`` map. Two natural list
@@ -143,7 +143,7 @@ def test_codex_governance_round_trip_features_trust() -> None:
 #   * The same path in BOTH lists (the second write to ``projects."<path>"``
 #     overwrites the first).
 #
-# Both situations were the root cause of the Wave-9 state-machine fuzz's
+# Both situations were the root cause of the  state-machine fuzz's
 # ``merge_twice_idempotent`` violations on adversarial governance edits:
 # neutral ``[/a, /a]`` round-tripped to ``[/a]`` through the Codex codec,
 # the engine classified the difference as TARGET-source drift on the second

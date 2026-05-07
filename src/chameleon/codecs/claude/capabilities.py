@@ -1,7 +1,7 @@
 """Claude codec for capabilities — V0 ships mcp_servers only.
 
 Claude's MCP server definitions live in two files (per the design spec
-§10.2): `~/.claude.json` (user-level mcpServers map) and `.mcp.json`
+): `~/.claude.json` (user-level mcpServers map) and `.mcp.json`
 (project-level). For V0 we serialize the operator's neutral
 `capabilities.mcp_servers` mapping into the user-level location; the
 assembler is what splits across files.
@@ -35,7 +35,7 @@ class _ClaudeMcpServerStdio(BaseModel):
     reject every modern Claude config (parity-gap.md P0-1).
     """
 
-    # ``extra="allow"`` (B1) — preserve upstream-introduced per-server
+    # ``extra="allow"`` — preserve upstream-introduced per-server
     # fields (e.g. ``startup_timeout_ms``, ``env_files``) through
     # round-trip via ``__pydantic_extra__``.
     model_config = ConfigDict(extra="allow")
@@ -44,7 +44,7 @@ class _ClaudeMcpServerStdio(BaseModel):
     command: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
-    # F-CWD (Wave-11): the on-disk Claude MCP stdio entry carries an
+    # the on-disk Claude MCP stdio entry carries an
     # optional ``cwd`` (working directory) field — the same shape Codex
     # and the upstream MCP spec model. Without it, ``McpServerStdio.cwd``
     # silently dropped through ``to_target`` / ``from_target``: the
@@ -162,7 +162,7 @@ class ClaudeCapabilitiesCodec:
         # ``mcp_servers`` (which depends on per-target reverse-codec
         # iteration) leaks into ``settings.json``.
         section = ClaudeCapabilitiesSection()
-        # Wave-10 §15.x — Claude has no top-level web-search mode setting.
+        # Claude has no top-level web-search mode setting.
         # The web-search lane is gated by ``permissions.allow``/``deny``
         # against the WebFetch / WebSearch tool names, which is structurally
         # different from neutral's ``cached``/``live``/``disabled`` axis.

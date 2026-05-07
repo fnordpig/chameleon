@@ -1,11 +1,13 @@
-"""Wave-15 §6.2 + §6.3: interactive resolution-memory acceptance.
+"""Interactive resolution-memory acceptance tests.
 
-§6.2 — different disagreement, same path: re-prompt with prior shown.
+Two end-to-end scenarios:
+
+1. **Different disagreement, same path: re-prompt with prior shown.**
    First merge picks ``[a]`` (claude wins) and persists a Resolution.
    Mutate one target's live file. Second merge re-prompts AND the
    re-prompted call's rendered prompt mentions the prior decision.
 
-§6.3 — interactive ``[t]`` choice produces a TARGET_SPECIFIC outcome.
+2. **Interactive ``[t]`` choice produces a TARGET_SPECIFIC outcome.**
    First merge picks ``[t]``. The resulting neutral.yaml has the
    unified path unset, has ``targets.<tid>.target_specific[<path>]``
    populated for each target, and a Resolution with
@@ -19,6 +21,7 @@ runs without a real TTY.
 from __future__ import annotations
 
 import io
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -95,15 +98,33 @@ def _patch_prompt_with_capture(
     return answer_iter
 
 
+def _tie_latest_mtimes(*paths: Path) -> None:
+    """Make ``latest`` ambiguous so these tests exercise the interactive fallback."""
+    timestamp_ns = 2_000_000_000
+    for path in paths:
+        if path.exists():
+            os.utime(path, ns=(timestamp_ns, timestamp_ns))
+
+
+def _tie_target_latest_mtimes(paths: dict[str, Path]) -> None:
+    home = paths["home"]
+    _tie_latest_mtimes(
+        home / ".claude" / "settings.json",
+        home / ".claude.json",
+        home / ".codex" / "config.toml",
+        home / ".codex" / "requirements.toml",
+    )
+
+
 # ---------------------------------------------------------------------------
-# §6.2 — re-prompt with prior decision after hash drift
+# — re-prompt with prior decision after hash drift
 # ---------------------------------------------------------------------------
 
 
 def test_invalidation_reprompts_with_prior_decision_visible(  # noqa: PLR0915 — full e2e
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """§6.2 acceptance: hash drift re-prompts; the prompt shows the prior decision.
+    """acceptance: hash drift re-prompts; the prompt shows the prior decision.
 
     Sequence:
         1. Bootstrap + initial clean merge.
@@ -144,6 +165,7 @@ def test_invalidation_reprompts_with_prior_decision_visible(  # noqa: PLR0915 �
         'model_reasoning_effort = "high"', 'model_reasoning_effort = "low"'
     )
     codex_config.write_text(codex_text)
+    _tie_target_latest_mtimes(paths)
 
     cleared: dict[str, object] = {"schema_version": 1, "identity": {}}
     neutral_file.write_text(dump_yaml(cleared), encoding="utf-8")
@@ -172,7 +194,7 @@ def test_invalidation_reprompts_with_prior_decision_visible(  # noqa: PLR0915 �
     # ChangeRecord shape (n0, n1, per_target) is genuinely different
     # from merge1's. This ensures (a) the walker sees a real CONFLICT
     # again (≥2 distinct non-LKG voices) and (b) the engine's
-    # recomputed hash won't match ``first_hash`` — driving the §6.2
+    # recomputed hash won't match ``first_hash`` — driving the
     # re-prompt path.
     #
     # After merge1 both live files were brought to "medium" (TAKE_TARGET
@@ -185,6 +207,7 @@ def test_invalidation_reprompts_with_prior_decision_visible(  # noqa: PLR0915 �
         'model_reasoning_effort = "medium"', 'model_reasoning_effort = "minimal"'
     )
     codex_config.write_text(codex_text)
+    _tie_target_latest_mtimes(paths)
     # Also clear the unified value again — the previous merge applied
     # the operator's TAKE_TARGET decision to composed, which would
     # otherwise be re-authored on the second merge as N₁. We preserve
@@ -224,14 +247,14 @@ def test_invalidation_reprompts_with_prior_decision_visible(  # noqa: PLR0915 �
 
 
 # ---------------------------------------------------------------------------
-# §6.3 — interactive [t] choice produces TARGET_SPECIFIC outcome end-to-end
+# — interactive [t] choice produces TARGET_SPECIFIC outcome end-to-end
 # ---------------------------------------------------------------------------
 
 
 def test_interactive_t_choice_persists_target_specific_resolution(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """§6.3 acceptance: interactive ``[t]`` → unified unset, per-target preserved.
+    """acceptance: interactive ``[t]`` → unified unset, per-target preserved.
 
     Sequence:
         1. Bootstrap + initial clean merge.
@@ -266,6 +289,7 @@ def test_interactive_t_choice_persists_target_specific_resolution(
         'model_reasoning_effort = "high"', 'model_reasoning_effort = "low"'
     )
     codex_config.write_text(codex_text)
+    _tie_target_latest_mtimes(paths)
 
     cleared: dict[str, object] = {"schema_version": 1, "identity": {}}
     neutral_file.write_text(dump_yaml(cleared), encoding="utf-8")
@@ -280,7 +304,7 @@ def test_interactive_t_choice_persists_target_specific_resolution(
     assert cli.main(["merge"]) == 0
     assert len(captured_prompts) == 1, "expected exactly one prompt for the [t] choice"
 
-    # 4. Verify §6.3's three observable effects.
+    # 4. Verify's three observable effects.
     n_after = _read_neutral(neutral_file)
 
     # (a) Resolution persisted with TARGET_SPECIFIC.

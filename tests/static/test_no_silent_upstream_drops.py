@@ -14,8 +14,8 @@ without one of three documented mechanisms:
    verbatim pass-through bag), or the codec section that handles its
    top-level key has ``extra="allow"`` somewhere along the path
    (so the unmodelled descendant survives via Pydantic's
-   ``__pydantic_extra__`` and is re-emitted by the assembler — Wave-5 B1
-   + Wave-7 F2).
+   ``__pydantic_extra__`` and is re-emitted by the assembler —  B1
+   +  F2).
 
 3. **Loss-warned**: the codec source emits a typed ``LossWarning`` that
    names this field — by ``field_path=FieldPath(segments=…)`` argument
@@ -177,7 +177,7 @@ def test_claude_no_silent_drops() -> None:
 
     If this fails, the failure message lists every offending field path
     and the reason its classifier returned ``silent-drop``. Each entry is
-    a Wave-9 fix candidate: claim the path, set the appropriate codec
+    a  fix candidate: claim the path, set the appropriate codec
     section ancestor to ``extra="allow"``, or add a ``LossWarning`` that
     names the field.
     """

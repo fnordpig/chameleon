@@ -1,4 +1,4 @@
-"""Wave-8 — exhaustive enum/Literal round-trip verification.
+"""exhaustive enum/Literal round-trip verification.
 
 For every ``Enum`` / ``StrEnum`` / ``IntEnum`` / ``Literal[...]`` field in
 the neutral schema, exhaustively round-trip every value through every
@@ -12,7 +12,7 @@ A field is considered claimed by a given codec iff
 ``codec.from_target(codec.to_target(domain_root, ctx), ctx)`` reproduces
 the original value at that path. Codecs that do not yet claim a
 schema-typed enum field (the typed-but-unimplemented surface tracked
-under §15.x of the design spec) cause that ``(field, value, codec)``
+under) cause that ``(field, value, codec)``
 case to be skipped, with a session-summary count emitted at end-of-run
 so the parity gap stays visible.
 
@@ -302,13 +302,13 @@ def test_round_trip(case: _Case) -> None:
         # the session summary surfaces the parity gap, then skip — the
         # round-trip can't be proven against a codec that drops the
         # value by design (see e.g. P1-G ClaudeAuthorizationCodec
-        # warning for ``reviewer``, or §15.x deferred fields).
+        # warning for ``reviewer``, or deferred fields).
         marker = f"{case.entry.path.render()} via {case.codec.__name__}"
         _SKIPPED_UNCLAIMED.append(marker)
         pytest.skip(
             f"{case.codec.__name__} does not round-trip "
             f"{case.entry.path.render()} (value dropped on encode/decode); "
-            "skipping per Wave-8 unclaimed-field policy."
+            "skipping per  unclaimed-field policy."
         )
     assert actual == case.value, (
         f"round-trip mismatch for {case.entry.path.render()} via "
@@ -339,7 +339,7 @@ def _emit_session_summary(request: pytest.FixtureRequest) -> Iterator[None]:
         return
     line = reporter.write_line
     line("")
-    line("Wave-8 enum-exhaustion catalog summary")
+    line(" enum-exhaustion catalog summary")
     line(f"  enum/Literal scalar leaves discovered: {len(CATALOG)}")
     line(f"  parametrised cases: {len(CASES)}")
     line(f"  passed (claimed): {len(_PASSED)}")

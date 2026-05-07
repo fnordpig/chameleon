@@ -6,7 +6,7 @@ in the overlay leave the base alone. Codecs run against the resolved
 result, never against the raw overlay.
 
 V0 ships profiles as schema-and-storage only; the `chameleon profile use`
-command that activates an overlay is deferred (§15.7).
+command that activates an overlay is deferred.
 """
 
 from __future__ import annotations

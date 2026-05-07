@@ -1,6 +1,6 @@
 """Claude codec for the authorization domain.
 
-Wave-13 S2 — Claude consumes the LCD-aligned schema split:
+ S2 — Claude consumes the LCD-aligned schema split:
 
   permission_mode                       ↔ permissions.defaultMode
                                           (Claude IS this axis — lossless)
@@ -17,7 +17,7 @@ LCD asymmetries (codec emits ``LossWarning`` on encode):
     the codec drops it on encode (no synthesis attempt) with a typed
     warning so the operator knows the field is Codex-side only.
   * ``approval_policy`` is a Codex-only axis. Same disposition.
-  * ``reviewer`` is Codex-only (P1-G). Same disposition (existing).
+  * ``reviewer`` is Codex-only. Same disposition (existing).
 
 LCD asymmetries (codec emits ``LossWarning`` on decode):
 
@@ -179,7 +179,7 @@ class ClaudeAuthorizationCodec:
                 )
             )
         if model.reviewer is not None:
-            # P1-G — Codex-only field at V0. Claude has no in-config equivalent
+            # Codex-only field at V0. Claude has no in-config equivalent
             # (Claude routes approvals through the runtime UI, not config).
             # The richer authorization unification (Claude pattern allow-lists
             # ↔ Codex named profiles) is P3, not this gap.
@@ -189,7 +189,7 @@ class ClaudeAuthorizationCodec:
                     target=BUILTIN_CLAUDE,
                     message=(
                         f"authorization.reviewer={model.reviewer.value!r} has no "
-                        "Claude equivalent (P1-G); the field is Codex-only — "
+                        "Claude equivalent; the field is Codex-only — "
                         "Claude routes approvals via the runtime UI"
                     ),
                 )

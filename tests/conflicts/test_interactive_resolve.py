@@ -33,6 +33,11 @@ def _quiet_console() -> Console:
     return Console(file=io.StringIO())
 
 
+def _capturing_console() -> tuple[Console, io.StringIO]:
+    buf = io.StringIO()
+    return Console(file=buf, width=200), buf
+
+
 def _patch_prompt(
     monkeypatch: pytest.MonkeyPatch,
     answer: str,
@@ -79,3 +84,20 @@ def test_interactive_resolver_pick_first_target(monkeypatch: pytest.MonkeyPatch)
     # Insertion order: per_target dict has claude first → letter `a`.
     outcome = resolver.resolve(_conflict())
     assert outcome.value == "claude-opus-4-7"
+
+
+def test_interactive_resolver_explains_chameleon_resolution_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_prompt(monkeypatch, answer="s")
+    console, buf = _capturing_console()
+    resolver = InteractiveResolver(console=console)
+    resolver.resolve(_conflict())
+    out = buf.getvalue()
+    assert "Chameleon is reconciling agent configuration" in out
+    assert "checked-in neutral" in out
+    assert "Claude Code live config" in out
+    assert "Codex live config" in out
+    assert "take neutral" in out
+    assert "take a target" in out
+    assert "keep target-specific values" in out

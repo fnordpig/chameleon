@@ -1,6 +1,6 @@
 """Foundational typed primitives shared across Chameleon.
 
-Per §5.4 of the design spec: everything is typed — no stringly-typed
+everything is typed — no stringly-typed
 identifiers float free in the codebase. TargetId is a registry-validated
 newtype; FieldPath is a tuple-based path through a Pydantic model;
 FileFormat / FileOwnership are closed enums; FileSpec is the typed
@@ -155,7 +155,7 @@ class FileOwnership(Enum):
 
     FULL: Chameleon owns every byte; safe to overwrite atomically.
     PARTIAL: Chameleon owns specific keys only (see FileSpec.owned_keys);
-        concurrency discipline in §10.5 applies on every write.
+        concurrency discipline  applies on every write.
     """
 
     FULL = "full"
@@ -189,7 +189,7 @@ class FileSpec(BaseModel):
             msg = (
                 f"FileSpec for {self.live_path!r} declares ownership=PARTIAL "
                 f"but provides no owned_keys; partial-ownership writes must "
-                f"name the top-level keys Chameleon owns (§10.5)."
+                f"name the top-level keys Chameleon owns."
             )
             raise ValueError(msg)
         return self

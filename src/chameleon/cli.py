@@ -1,6 +1,6 @@
 """Chameleon CLI — argparse subcommand router with typed parsing.
 
-Per design spec §5.4 (strict typing): CLI arg parsing produces typed
+Per design spec (strict typing): CLI arg parsing produces typed
 TargetId, Domains, OnConflict values; no string match statements
 downstream.
 """
@@ -27,6 +27,8 @@ from chameleon.merge.engine import MergeEngine, MergeRequest, MergeResult
 from chameleon.merge.resolutions import compute_decision_hash, render_change_path
 from chameleon.merge.resolve import (
     InteractiveResolver,
+    LatestResolutionError,
+    LatestResolver,
     NonInteractiveResolver,
     Resolver,
     Strategy,
@@ -47,6 +49,11 @@ from chameleon.targets._registry import TargetRegistry
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--neutral", type=str, default=None, help="path to the neutral.yaml file")
     parser.add_argument("--quiet", action="store_true")
+    parser.add_argument(
+        "--no-warn",
+        action="store_true",
+        help="suppress LossWarning errata after merge",
+    )
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument(
         "--verbose",
@@ -78,8 +85,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_merge.add_argument(
         "--on-conflict",
         type=str,
-        default="fail",
-        help="fail | keep | prefer-neutral | prefer-lkg | prefer=<target>",
+        default=None,
+        help="latest | fail | keep | prefer-neutral | prefer-lkg | prefer=<target>",
     )
     p_merge.add_argument("--profile", type=str, default=None)
 
@@ -131,7 +138,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     p_resolutions = sub.add_parser(
         "resolutions",
-        help="inspect or clear stored conflict resolutions (Wave-15 §4)",
+        help="inspect or clear stored conflict resolutions ()",
     )
     _add_common_args(p_resolutions)
     p_resolutions.add_argument(
@@ -193,15 +200,18 @@ def _cmd_init(args: argparse.Namespace) -> int:
 def _resolver_from_args(args: argparse.Namespace) -> Resolver:
     """Pick a Resolver based on --on-conflict and TTY presence.
 
-    The operator can force a non-interactive strategy with --on-conflict;
-    otherwise interactive resolution is used when stdin is a TTY (for
-    login-time / CI / pipe contexts the FAIL strategy applies).
+    Omitted ``--on-conflict`` defaults to ``latest``: pick the uniquely
+    newest changed source when Chameleon can prove it, then prompt on a
+    TTY for ambiguity. Explicit non-latest strategies are
+    non-interactive by design.
     """
-    raw = args.on_conflict
-    explicit = raw != "fail" or not stdin_is_a_tty()
-    if explicit or not stdin_is_a_tty():
-        return NonInteractiveResolver(on_conflict_to_strategy(raw))
-    return InteractiveResolver()
+    raw = args.on_conflict or "latest"
+    strategy = on_conflict_to_strategy(raw)
+    if strategy.kind is OnConflict.LATEST:
+        if stdin_is_a_tty():
+            return LatestResolver(InteractiveResolver())
+        return LatestResolver()
+    return NonInteractiveResolver(strategy)
 
 
 def _cmd_merge(args: argparse.Namespace) -> int:
@@ -211,12 +221,20 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     if args.verbose:
         _emit_verbose_preamble(paths, targets)
     engine = MergeEngine(targets=targets, paths=paths, resolver=resolver)
-    result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
+    try:
+        result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
+    except LatestResolutionError as e:
+        sys.stderr.write(f"error: {e}\n")
+        sys.stderr.write(
+            "rerun `chameleon merge` from an interactive shell or choose "
+            "`--on-conflict=<strategy>` explicitly\n"
+        )
+        return 1
     # On dry-run, render any FileDiffs as a unified diff (one per file the
     # engine would have written) before the summary line. Reuses the same
     # `_emit_diff` colorizer the `chameleon diff` path uses so dry-run and
     # post-merge `diff` look identical.
-    if args.dry_run and result.diffs:
+    if args.dry_run and result.diffs and not args.quiet:
         stdout_console = Console(file=sys.stdout, highlight=False, soft_wrap=True)
         for fd in result.diffs:
             if not fd.changed:
@@ -229,13 +247,15 @@ def _cmd_merge(args: argparse.Namespace) -> int:
                 live_label=f"{fd.target.value} merge",
             )
             _emit_diff(diff_text, stdout_console=stdout_console)
-    sys.stdout.write(result.summary + "\n")
+    if not args.quiet:
+        sys.stdout.write(result.summary + "\n")
     # P0-2: print LossWarnings to stderr after the summary so the operator
     # sees what (if anything) was skipped without changing the exit code.
     # The warning includes the field-level error from Pydantic so the
     # operator can find the offending key in their live config.
-    for w in result.warnings:
-        sys.stderr.write(f"warning: [{w.target.value}/{w.domain.value}] {w.message}\n")
+    if not args.no_warn:
+        for w in result.warnings:
+            sys.stderr.write(f"warning: [{w.target.value}/{w.domain.value}] {w.message}\n")
     if args.verbose:
         _emit_verbose_summary(result, targets)
     return result.exit_code
@@ -595,7 +615,7 @@ def _cmd_discard(args: argparse.Namespace) -> int:  # noqa: PLR0911 — guard ch
 
         if spec.ownership is FileOwnership.PARTIAL:
             # Decode the HEAD blob as JSON, replay only the owned-key subset
-            # back into live; everything else live keeps wins (§10.5).
+            # back into live; everything else live keeps wins.
             head_obj = json.loads(head_bytes) if head_bytes.strip() else {}
             if not isinstance(head_obj, dict):
                 head_obj = {}
@@ -681,7 +701,7 @@ def _classify_resolution_status(  # noqa: PLR0912 — single linear walk over ta
 
 
 def _cmd_resolutions(args: argparse.Namespace) -> int:  # noqa: PLR0911 — guard chain
-    """`chameleon resolutions list|clear` — operator escape hatch (§4)."""
+    """`chameleon resolutions list|clear` — operator escape hatch."""
     paths = _resolve_paths(args)
     stderr = Console(stderr=True, highlight=False)
 

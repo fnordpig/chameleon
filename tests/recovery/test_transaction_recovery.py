@@ -11,7 +11,7 @@ Several tests here are `xfail(strict=True)` against the V0+ engine —
 the marker plumbing is declared in `state.transaction` and the doctor
 already enumerates `tx_store.entries()`, but the engine itself does
 not yet wire `MergeEngine.merge()` through `tx_store.write()` /
-`tx_store.clear()`. Wave-6 land-the-engine-changes flips these to
+`tx_store.clear()`.  land-the-engine-changes flips these to
 real assertions; until then the test surface documents the contract
 the engine must satisfy.
 """
@@ -195,7 +195,7 @@ def test_doctor_surfaces_stale_marker(
 
 
 # --------------------------------------------------------------------------
-# 3. A successful merge clears stale markers (Wave-6 recovery contract).
+# 3. A successful merge clears stale markers ( recovery contract).
 # --------------------------------------------------------------------------
 
 

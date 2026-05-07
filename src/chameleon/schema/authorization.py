@@ -1,6 +1,6 @@
 """authorization domain — what the agent may do.
 
-Wave-13 S1 ships the LCD (lowest-common-denominator) schema half of the
+ S1 ships the LCD (lowest-common-denominator) schema half of the
 P3 unification — see ``docs/superpowers/specs/2026-05-06-p3-authorization-design.md``.
 S2 (Claude codec) and S3 (Codex codec) consume the schema in the
 follow-up wave.
@@ -16,7 +16,7 @@ LCD principles encoded here:
       ``approval_policy``)
 * Pass-through for everything richer via the existing
   ``targets.{claude,codex}.items["permissions"]`` machinery
-  (Wave-5 B1 + Wave-7 F2).
+  ( B1 +  F2).
 * ``LossWarning`` on cross-target asymmetry so the operator sees
   authored fields that don't propagate.
 """
@@ -38,7 +38,7 @@ class SandboxMode(Enum):
         Neutral's ``FULL_ACCESS`` projects to Codex's
         ``danger-full-access`` (the codec owns the rename).
 
-    Renamed from ``DefaultMode`` in Wave-13 S1 — the original name was
+    Renamed from ``DefaultMode`` in  S1 — the original name was
     always Codex-shaped (the values mirror Codex's wire enum). The new
     name is honest about which axis this represents.
     """
@@ -57,7 +57,7 @@ class PermissionMode(Enum):
         ``default``, ``acceptEdits``, ``plan``, ``auto``, ``dontAsk``,
         ``bypassPermissions``, ``delegate``.
 
-    Wave-13 S1 LCD scope: this enum models only the 3 values with
+     S1 LCD scope: this enum models only the 3 values with
     unambiguous cross-target meaning:
 
       * ``DEFAULT`` — prompt on first use.
@@ -90,7 +90,7 @@ class ApprovalPolicy(Enum):
         ``granular`` BaseModel structured shape), ``AskForApproval5``
         (``never``).
 
-    Wave-13 S1 LCD scope: this enum models the 4 string-valued arms.
+     S1 LCD scope: this enum models the 4 string-valued arms.
 
       * ``UNTRUSTED`` — only ``is_safe_command()``-approved reads
         auto-approve.
@@ -120,7 +120,7 @@ class ApprovalPolicy(Enum):
 
 
 class Reviewer(Enum):
-    """Who reviews escalated approval requests (P1-G).
+    """Who reviews escalated approval requests.
 
     Codex-only at the field level today: Codex's ``approvals_reviewer``
     routes sandbox escapes, blocked network access, MCP approval prompts,
@@ -156,7 +156,7 @@ class NetworkPolicy(BaseModel):
 
 
 class Authorization(BaseModel):
-    """Wave-13 S1 LCD schema; codecs landing in S2 (Claude) and S3 (Codex)."""
+    """S1 LCD schema; codecs landing in S2 (Claude) and S3 (Codex)."""
 
     model_config = ConfigDict(extra="forbid")
 

@@ -1,6 +1,6 @@
-"""FUZZ-6 — Unicode broadside (Wave-9).
+"""FUZZ-6 — Unicode broadside.
 
-Wave-5 B4 fixed a single em-dash escape bug in
+ B4 fixed a single em-dash escape bug in
 :func:`chameleon.state.locks.partial_owned_write` (the partial-owned
 JSON write path was passing user content through stdlib :func:`json.dumps`
 without ``ensure_ascii=False``). That fix flipped one switch on one
@@ -34,7 +34,7 @@ crashes that surface in JSON serialisation are bugs in the *serializer*
 (and in the user code that synthesised an unpaired surrogate), not in
 chameleon — so we do not generate them.
 
-A genuine Unicode round-trip failure detected here is a Wave-11
+A genuine Unicode round-trip failure detected here is a
 finding (B4-class regression) and should be reported with the failing
 example, the codec / serializer involved, and the codepoint ranges
 implicated.

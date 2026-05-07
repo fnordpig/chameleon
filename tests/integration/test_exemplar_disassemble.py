@@ -1,7 +1,7 @@
 """End-to-end disassemble of the sanitized exemplar fixture.
 
 This is the test that catches gaps between codec-level fixes and
-assembler-level routing. Wave-1 Agent C correctly fixed the directives
+assembler-level routing.  Agent C correctly fixed the directives
 codec to accept three legacy commit-attribution aliases but flagged
 that the assembler's hardcoded ``directives_keys`` set didn't route
 them through. Without an end-to-end test like this one, that gap would
@@ -86,7 +86,7 @@ def test_codex_disassemble_against_exemplar_routes_known_keys() -> None:
         "P1-A claimed Codex's [plugins.*] and [marketplaces.*] tables; "
         "the capabilities domain should now disassemble from this exemplar"
     )
-    # After Wave-4, every top-level Codex key in the exemplar is claimed
+    # After , every top-level Codex key in the exemplar is claimed
     # by a codec. ``expected_passthrough`` is therefore empty — if a future
     # Codex config introduces a new key chameleon doesn't model, this test
     # surfaces it as an unexpected pass-through entry rather than as silent

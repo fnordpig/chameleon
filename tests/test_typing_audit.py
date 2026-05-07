@@ -1,6 +1,6 @@
 """Forbidden-pattern audit enforcing the "everything is typed - no strings" rule.
 
-Per design spec §5.4: the API surface must not use stringly-typed identifiers.
+the API surface must not use stringly-typed identifiers.
 This is a blunt grep-based test that catches regressions cheaply. Whitelisted
 patterns are documented inline; if you need to add to the whitelist, add a
 comment explaining *why* the exception is principled.

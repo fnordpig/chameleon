@@ -94,7 +94,7 @@ class TestFileSpec:
         assert spec.format is FileFormat.JSON
 
     def test_partial_ownership_requires_owned_keys(self) -> None:
-        # Partial-ownership FileSpecs must declare which keys we own (§10.5).
+        # Partial-ownership FileSpecs must declare which keys we own.
         with pytest.raises(ValidationError):
             FileSpec(
                 live_path="~/.claude.json",

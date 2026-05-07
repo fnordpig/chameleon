@@ -18,14 +18,14 @@ from chameleon.schema.neutral import Resolution, ResolutionDecisionKind
 
 
 class ResolverOutcome(BaseModel):
-    """Typed return shape for ``Resolver.resolve`` (resolution-memory §5).
+    """Typed return shape for ``Resolver.resolve`` (resolution-memory ).
 
     ``decision`` records which of the five operator choices the resolver
     made; ``value`` is the actual resolved leaf value (or ``None`` for
     SKIP / TARGET_SPECIFIC, where there is no single unified value);
     ``persist`` is set by the resolver itself — interactive resolvers
     persist their decisions; non-interactive strategies do not (the
-    spec's §3 rule: "non-interactive strategies are stateless by
+    spec's rule: "non-interactive strategies are stateless by
     design").
     """
 
@@ -50,6 +50,10 @@ class Strategy(BaseModel):
     target: TargetId | None = None
 
 
+class LatestResolutionError(RuntimeError):
+    """Raised when the latest-source strategy cannot choose safely."""
+
+
 def on_conflict_to_strategy(raw: str) -> Strategy:
     """Parse the CLI's --on-conflict argument into a typed Strategy."""
     if raw.startswith("prefer="):
@@ -62,6 +66,7 @@ def on_conflict_to_strategy(raw: str) -> Strategy:
 
     mapping = {
         "fail": OnConflict.FAIL,
+        "latest": OnConflict.LATEST,
         "keep": OnConflict.KEEP,
         "prefer-neutral": OnConflict.PREFER_NEUTRAL,
         "prefer-lkg": OnConflict.PREFER_LKG,
@@ -69,11 +74,62 @@ def on_conflict_to_strategy(raw: str) -> Strategy:
     return Strategy(kind=mapping[raw])
 
 
+def _latest_outcome(conflict: Conflict, *, persist: bool) -> ResolverOutcome:
+    """Resolve a conflict by the uniquely newest changed source.
+
+    The strategy is intentionally conservative: every changed source
+    must carry a timestamp, and the maximum timestamp must be unique.
+    Otherwise the caller can fall back to interactive resolution or fail
+    in unattended contexts.
+    """
+    record = conflict.record
+    candidates: list[tuple[int, ChangeSource, TargetId | None, Any]] = []
+    changed_count = 0
+
+    if record.n1 != record.n0:
+        changed_count += 1
+        if record.neutral_mtime_ns is not None:
+            candidates.append((record.neutral_mtime_ns, ChangeSource.NEUTRAL, None, record.n1))
+
+    for tid, val in record.per_target.items():
+        if val == record.n0:
+            continue
+        changed_count += 1
+        mtime = record.per_target_mtime_ns.get(tid)
+        if mtime is not None:
+            candidates.append((mtime, ChangeSource.TARGET, tid, val))
+
+    if len(candidates) != changed_count:
+        msg = f"missing timestamp for latest conflict on {record.render_path()}"
+        raise LatestResolutionError(msg)
+
+    newest_mtime = max(mtime for mtime, _src, _tid, _val in candidates)
+    newest = [item for item in candidates if item[0] == newest_mtime]
+    if len(newest) != 1:
+        msg = f"ambiguous latest conflict on {record.render_path()}: tied newest sources"
+        raise LatestResolutionError(msg)
+
+    _mtime, src, tid, val = newest[0]
+    if src is ChangeSource.NEUTRAL:
+        return ResolverOutcome(
+            decision=ResolutionDecisionKind.TAKE_NEUTRAL,
+            value=val,
+            persist=persist,
+        )
+    assert tid is not None
+    return ResolverOutcome(
+        decision=ResolutionDecisionKind.TAKE_TARGET,
+        decision_target=tid,
+        value=val,
+        persist=persist,
+    )
+
+
 class NonInteractiveResolver:
     """Resolve conflicts according to a CLI-supplied Strategy.
 
     Non-interactive strategies never persist — see resolution-memory
-    spec §3. Each invocation produces a ``ResolverOutcome`` with
+    spec. Each invocation produces a ``ResolverOutcome`` with
     ``persist=False``.
     """
 
@@ -89,6 +145,8 @@ class NonInteractiveResolver:
                 f"neutral={record.n1!r} per_target={record.per_target!r}"
             )
             raise RuntimeError(msg)
+        if kind is OnConflict.LATEST:
+            return _latest_outcome(conflict, persist=False)
         if kind is OnConflict.KEEP:
             return ResolverOutcome(
                 decision=ResolutionDecisionKind.SKIP,
@@ -119,14 +177,29 @@ class NonInteractiveResolver:
         raise RuntimeError(msg)
 
 
+class LatestResolver:
+    """Try newest-source resolution, then optionally delegate on ambiguity."""
+
+    def __init__(self, fallback: Resolver | None = None) -> None:
+        self.fallback = fallback
+
+    def resolve(self, conflict: Conflict) -> ResolverOutcome:
+        try:
+            return _latest_outcome(conflict, persist=False)
+        except LatestResolutionError:
+            if self.fallback is None:
+                raise
+            return self.fallback.resolve(conflict)
+
+
 class InteractiveResolver:
-    """Prompt the operator on a TTY for each conflict, per design spec §5.1.
+    """Prompt the operator on a TTY for each conflict, per design spec.
 
     Renders the four sources (was/now/per-target) as a table and accepts
     a single-character choice: [n] take neutral, [a]/[b] take a target,
     [k] revert to N₀ (last-known-good), [s] skip (leave unresolved).
 
-    Wave-15 W15-B extends the prompt with a [t] target-specific choice
+     W15-B extends the prompt with a [t] target-specific choice
     and renders prior decisions as defaults; this base implementation
     only owns the unwrapping into a typed ``ResolverOutcome`` so the
     engine has a single interface contract regardless of which resolver
@@ -135,10 +208,30 @@ class InteractiveResolver:
 
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console(stderr=True)
+        self._printed_preamble = False
+
+    def _print_preamble_once(self) -> None:
+        if self._printed_preamble:
+            return
+        self._printed_preamble = True
+        self.console.print(
+            "[bold]Chameleon is reconciling agent configuration.[/]\n\n"
+            "Sources:\n"
+            "  - checked-in neutral: neutral.yaml\n"
+            "  - Claude Code live config: ~/.claude/settings.json and ~/.claude.json\n"
+            "  - Codex live config: ~/.codex/config.toml\n\n"
+            "A setting changed in more than one place and Chameleon cannot safely pick one.\n"
+            "Choose:\n"
+            "  n  take neutral\n"
+            "  a/b/c...  take a target\n"
+            "  k  revert to last-known-good\n"
+            "  t  keep target-specific values\n"
+            "  s  skip for now"
+        )
 
     @staticmethod
     def _format_prior_decision(prior: Resolution) -> str:
-        """Render a one-line summary of a prior decision (W15-B §6.2).
+        """Render a one-line summary of a prior decision (W15-B ).
 
         Used to give the operator context when re-prompting because the
         invalidation hash drifted. Informational only — the operator must
@@ -166,6 +259,7 @@ class InteractiveResolver:
     def resolve(self, conflict: Conflict) -> ResolverOutcome:
         record = conflict.record
         path_label = record.render_path()
+        self._print_preamble_once()
 
         # Render the four sources with letter codes
         table = Table(
@@ -202,7 +296,7 @@ class InteractiveResolver:
 
         self.console.print(table)
         # Render the prior decision as informational context above the
-        # choice banner when the engine populated one (W15-B §6.2). The
+        # choice banner when the engine populated one (W15-B ). The
         # prior does NOT pre-fill the choice — the operator must answer.
         if conflict.prior_decision is not None:
             self.console.print(self._format_prior_decision(conflict.prior_decision))
@@ -222,7 +316,7 @@ class InteractiveResolver:
         )
 
         # Translate the raw choice into a typed ResolverOutcome. Interactive
-        # decisions persist by default (resolution-memory spec §3).
+        # decisions persist by default (resolution-memory spec ).
         if choice == "s":
             return ResolverOutcome(
                 decision=ResolutionDecisionKind.SKIP,
@@ -270,6 +364,8 @@ def stdin_is_a_tty() -> bool:
 
 __all__ = [
     "InteractiveResolver",
+    "LatestResolutionError",
+    "LatestResolver",
     "NonInteractiveResolver",
     "Resolver",
     "ResolverOutcome",

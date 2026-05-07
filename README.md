@@ -1,186 +1,501 @@
 # Chameleon
 
-> One neutral configuration; many AI coding agents. Bidirectional.
+**One neutral config for Claude Code and Codex CLI, with round-trip merge in both directions.**
 
-Chameleon transpiles a single neutral YAML configuration into Claude
-Code's `settings.json` (+ `~/.claude.json`) and OpenAI Codex CLI's
-`config.toml` (and back again). When an agent edits its own
-configuration at runtime, Chameleon detects the drift, prompts you to
-resolve any conflict (interactively or via a configured strategy), and
-re-derives every other agent's view so your intent stays consistent
-across tools.
+Chameleon keeps a repo-backed neutral YAML file as the source of truth for
+your AI coding setup, but it does not pretend the live agent configs are
+read-only. Claude and Codex can still mutate their own files at runtime. On
+the next merge, Chameleon detects that drift, reconciles it back into neutral,
+and re-derives every other target.
 
-## Status
+That makes Chameleon the reconciliation layer between:
 
-**0.4.0 — pre-1.0, parity-gap DAG closed: LCD authorization shipped, zero strict xfails.**
+- operator-authored neutral config
+- Claude Code's live files
+- Codex CLI's live files
+- login-time background merges
 
-All eight schema domains — `identity`, `directives`, `capabilities`,
-`environment`, `authorization`, `lifecycle`, `interface`,
-`governance` — have working codecs for both targets, with documented
-`LossWarning`s where the two targets genuinely diverge. The original
-parity-gap DAG is closed: Wave-13's LCD (lowest-common-denominator)
-authorization scheme covers the structurally-common subset
-(`permission_mode` Claude-side, `sandbox_mode` and `approval_policy`
-Codex-side) losslessly on its claiming target and emits typed
-`LossWarning`s on cross-target encode. The rich cases — Claude's
-`Bash(...)` pattern-language permissions, Codex's named
-`[permissions.<name>]` profiles, Codex's granular discriminated-union
-approval — are intentionally NOT translated; they ride pass-through
-byte-faithfully and do not propagate cross-target. See
-`docs/superpowers/specs/2026-05-06-p3-authorization-design.md` for
-the design exploration.
+Today Chameleon ships built-in targets for Claude Code and Codex CLI. The
+plugin system is designed so more targets can join the same loop.
 
-The 0.4.0 verification posture is **exhaustive proof + property fuzz**:
+## What it manages
 
-- **2119/2119** upstream wire fields statically accounted for (no
-  silent drops audit, unchanged from 0.3.0; Codex `claimed
-  171 → 178`, `pass-through 528 → 521` reflects the LCD prefix-claims).
-- **Every finite-domain enum / `Literal` reachable from the neutral
-  schema** proved bijective by enumeration, including Wave-13's new
-  `PermissionMode` (Claude) and `ApprovalPolicy` (Codex), and the
-  renamed `SandboxMode` (Codex).
-- **Six Hypothesis-driven fuzzer families** covering per-codec
-  round-trip, cross-target unification differential, pass-through
-  deep-nesting, the merge engine state machine, and Unicode broadside.
+Current built-in targets:
 
-The test suite is **463 passing + 35 skipped + 70 fuzz tests
-(deselected by default)**. **Zero strict-xfails** remain on the
-default suite. The fuzz suite runs nightly in CI under
-`uv run pytest -m fuzz`. See `CHANGELOG.md` for the per-wave
-breakdown and `docs/superpowers/specs/2026-05-05-chameleon-design.md`
-for the architecture.
+- Claude: `~/.claude/settings.json` and the `mcpServers` slice of `~/.claude.json`
+- Codex: `~/.codex/config.toml` and `~/.codex/requirements.toml`
 
-### What's verified end-to-end
+Chameleon stores its own state in XDG locations:
 
-`tests/integration/test_exemplar_byte_roundtrip.py` runs the full
-operator workflow against a sanitized real-world Claude+Codex exemplar
-(`tests/fixtures/exemplar/`) and asserts:
+- neutral config: `~/.config/chameleon/neutral.yaml`
+- state root: `~/.local/state/chameleon/`
+- per-target state repos: `~/.local/state/chameleon/targets/<target>/`
+- last-known-good neutral snapshot: `~/.local/state/chameleon/neutral.lkg.yaml`
+- operator notices: `~/.local/state/chameleon/notices/`
 
-- **Semantic round-trip.** `chameleon init && chameleon merge
-  --on-conflict=keep` on the live Claude `settings.json`, Codex
-  `config.toml`, and `~/.claude.json` produces the same semantic
-  content modulo the documented Wave-5 transforms (P1-D
-  legacy-attribution consolidation, P1-A capabilities reconciliation
-  union, B2 sorted-by-key dict ordering, cosmetic empty blocks).
-- **Byte-stable idempotency.** Two consecutive `keep`-merges produce
-  byte-identical target files.
-- **Full Unicode preservation.** Every non-ASCII codepoint in the
-  original `~/.claude.json` survives the merge.
-- **Zero unexpected pass-through.** After Wave-4, every claimed key
-  has a real codec — `targets.<target>.items` is empty after
-  round-trip.
+Each target gets a small local git repo. Those repos are not decoration; they
+are how Chameleon remembers last-applied state, computes drift, restores a
+target, and keeps a timeline of what was merged.
 
-`tests/integration/test_login_recipes.py` pins the login recipes
-shipped in `docs/login/*.md` to the live CLI surface so the published
-invocations don't drift.
+## Why this exists
 
-## Why YAML?
+Claude and Codex overlap enough that maintaining both configs by hand gets old,
+but they are not the same system.
 
-The neutral form is YAML so that operator-authored comments and anchors
-survive a round-trip; both target formats (Claude's JSON and Codex's
-TOML) are also written via formatters that preserve key order — and
-TOML preserves comments — so `git diff` on live target files stays
-informative rather than noisy.
+- Some settings are truly shared and should propagate across tools.
+- Some settings are target-specific and should survive round-trip without being
+  flattened away.
+- Some settings conflict and need an operator decision.
+- Some merges need to happen unattended at login, without blocking your shell.
+
+Chameleon handles those cases with a neutral schema, per-target codecs,
+pass-through bags for target-only data, and an explicit conflict model instead
+of silent overwrite.
+
+## Core workflow
+
+```mermaid
+graph LR
+    A["neutral.yaml"] --> B["merge"]
+    C["Claude live files"] --> B
+    D["Codex live files"] --> B
+    B --> E["state repos"]
+    B --> F["re-derived Claude"]
+    B --> G["re-derived Codex"]
+```
+
+The merge reads four sources for each logical key:
+
+- `N0`: last-known-good neutral
+- `N1`: current neutral file
+- per-target live values
+- any stored prior resolution for the same conflict path
+
+If everything agrees, the merge is silent. If they do not, Chameleon either:
+
+- accepts the uniquely newest changed source with `latest`
+- resolves interactively on a TTY
+- applies a non-interactive strategy
+- exits non-zero when unattended resolution is unsafe
 
 ## Quick start
 
-Every command goes through `uv` — this is a uv-wrapped project.
+Chameleon is a `uv` project. Use `uv run`, not bare `python` or `pytest`.
 
 ```sh
 uv sync
-uv run chameleon init     # writes ~/.config/chameleon/neutral.yaml
-$EDITOR ~/.config/chameleon/neutral.yaml
-uv run chameleon merge    # transpiles into ~/.claude/settings.json + ~/.codex/config.toml
+uv run chameleon init
 ```
 
-A minimal neutral file:
+`init` bootstraps `neutral.yaml` if missing, then runs a merge with the
+equivalent of "keep target-local drift".
+
+Edit the neutral file:
 
 ```yaml
 schema_version: 1
+
 identity:
   reasoning_effort: high
   model:
     claude: claude-sonnet-4-7
     codex: gpt-5.4
+
+directives:
+  system_prompt_file: ~/.config/chameleon/AGENTS.md
+
+capabilities:
+  mcp_servers:
+    memory:
+      transport: stdio
+      command: npx
+      args:
+        - -y
+        - "@modelcontextprotocol/server-memory"
+
 environment:
   variables:
     CI: "true"
 ```
 
-After `chameleon merge`:
+Then apply it:
 
-- `~/.claude/settings.json` contains `"model": "claude-sonnet-4-7"`,
-  `"effortLevel": "high"`, `"env": {"CI": "true"}`.
-- `~/.codex/config.toml` contains `model = "gpt-5.4"`,
-  `model_reasoning_effort = "high"`, and the env under
-  `[shell_environment_policy.set]`.
+```sh
+uv run chameleon merge
+```
 
-If a target's live file drifts (say you edit `~/.codex/config.toml`
-directly), the next `merge` detects it. On a TTY without an explicit
-`--on-conflict`, you get an interactive 4-source diff (was / neutral /
-per-target) with one-letter choices to take any source, revert to
-last-known-good, or skip. Non-interactive runs use
-`--on-conflict={fail,keep,prefer-neutral,prefer-lkg,prefer=<target>}`.
+Plain `chameleon merge` defaults to `latest`: if exactly one newest changed
+source can be proven, Chameleon takes it. On an interactive TTY, ambiguous
+conflicts fall through to the resolver prompt. Off a TTY, ambiguity exits
+non-zero rather than guessing.
+
+## What a merge actually does
+
+`chameleon merge` is not just "render YAML into JSON and TOML".
+
+It:
+
+1. Reads live target files.
+2. Disassembles them back into neutral-shaped fragments.
+3. Compares those fragments against current neutral and last-known-good neutral.
+4. Detects conflicts at the neutral-key level.
+5. Resolves them interactively or non-interactively.
+6. Re-assembles target files.
+7. Writes live files and state repos.
+8. Updates last-known-good neutral.
+9. Clears stale transaction markers after a clean run.
+
+If nothing changed, the summary is `merge: nothing to do`.
+
+## Conflict behavior
+
+This is the part that matters.
+
+### Interactive merge
+
+On a TTY, `uv run chameleon merge` opens an interactive resolver when needed.
+For each conflicting key, it shows:
+
+- last-known-good neutral (`N0`)
+- current neutral (`N1`)
+- each changed target value
+
+You can choose:
+
+- neutral
+- one target
+- last-known-good
+- target-specific preservation
+- skip
+
+Interactive decisions are stored in `neutral.resolutions`. If the same
+conflict shape appears again, Chameleon can replay the prior decision instead
+of prompting every time. If the values drift enough to invalidate the old
+decision hash, it re-prompts and shows the old decision as context.
+
+### Non-interactive strategies
+
+For unattended runs:
+
+```sh
+uv run chameleon merge --on-conflict=latest
+uv run chameleon merge --on-conflict=fail
+uv run chameleon merge --on-conflict=keep
+uv run chameleon merge --on-conflict=prefer-neutral
+uv run chameleon merge --on-conflict=prefer-lkg
+uv run chameleon merge --on-conflict=prefer=claude
+uv run chameleon merge --on-conflict=prefer=codex
+```
+
+Meaning:
+
+- `latest`: take the uniquely newest changed source; fail if ambiguous
+- `fail`: stop on conflict
+- `keep`: leave unresolved cross-target drift in place
+- `prefer-neutral`: current neutral wins
+- `prefer-lkg`: revert to last-known-good neutral
+- `prefer=<target>`: one target wins
+
+`adopt <target>` is a convenience wrapper for `merge --on-conflict=prefer=<target>`.
+
+## Login and dotfiles integration
+
+Chameleon is built for login-time sync.
+
+The intended model is:
+
+- dotfiles pull/install happens first
+- Chameleon runs last
+- clean merges produce no output
+- ambiguous conflicts explain themselves before prompting on an interactive shell
+
+The repo ships recipes for:
+
+- `docs/login/launchd.md`
+- `docs/login/systemd.md`
+- `docs/login/zlogin.md`
+
+The unattended form is:
+
+```sh
+uv run chameleon merge --on-conflict=latest --quiet --no-warn
+```
+
+For a repo-backed neutral in dotfiles, pass it explicitly:
+
+```sh
+uv run chameleon merge \
+  --neutral "$DOTFILES_DIR/chameleon/neutral.yaml" \
+  --on-conflict=latest \
+  --quiet \
+  --no-warn
+```
+
+If a clean merge changes that checked-in neutral file, it is left as a normal
+dirty working-tree change. Chameleon never commits or pushes for you.
+
+If Git reports a conflict in `chameleon/neutral.yaml`, resolve the Git conflict
+first. Then rerun `chameleon merge` so the merged neutral spreads to Claude and
+Codex.
+
+If Chameleon itself sees an ambiguous conflict on an interactive login, it
+prints a short preamble explaining the neutral, Claude, and Codex sources before
+asking you to choose. In a non-interactive service, the same ambiguity exits
+non-zero and should be resolved by rerunning `chameleon merge` from a shell.
 
 ## CLI
 
-| Command | Purpose |
-|---|---|
-| `chameleon init` | Bootstrap the neutral file and per-target state-repos |
-| `chameleon merge` | Run the round-trip: read live targets → resolve conflicts → re-derive |
-| `chameleon status` | Show drift between live target files and state-repo HEADs |
-| `chameleon log <target>` | Show merge / adopt history for one target |
-| `chameleon adopt <target>` | Pull a target's live state into neutral |
-| `chameleon validate` | Lint the neutral file against the Pydantic schema |
-| `chameleon doctor` | Surface stale transaction markers and login-time notices |
-| `chameleon targets list` | List registered targets (built-ins + plugins) |
-| `chameleon diff` | Unified diff of live targets vs. re-derived projection of neutral |
-| `chameleon discard <target>` | Revert a target's live file to its state-repo HEAD |
-| `chameleon merge --dry-run` | Run the full pipeline and emit the diff without writing |
+### `init`
 
-## Login-time integration
+```sh
+uv run chameleon init
+uv run chameleon init --dry-run
+```
 
-`docs/login/` contains drop-in recipes for `launchd` (macOS),
-`systemd --user` (Linux), and shell `rc` snippets. The recommended
-non-interactive invocation for unattended runs is
-`chameleon merge --on-conflict=fail --quiet`; failures are persisted
-as typed `LoginNotice` records that `chameleon doctor` surfaces on
-your next interactive shell.
+Creates a minimal neutral file if needed, then runs an initial merge.
 
-## Plugin authoring
+### `merge`
 
-Adding a third agent target is a plugin install away — see
-`docs/plugins/authoring.md`. A target plugin ships a `Target` class
-(eight codecs + an assembler), registers via the
-`chameleon.targets` entry point, and vendors its own upstream-derived
-`_generated.py` Pydantic model.
+```sh
+uv run chameleon merge
+uv run chameleon merge --dry-run
+uv run chameleon merge --verbose
+uv run chameleon merge --quiet --no-warn
+uv run chameleon merge --profile deep-review
+uv run chameleon merge --on-conflict=prefer=codex
+```
+
+- `--dry-run` emits unified diffs for files it would write
+- `--verbose` prints state paths, registered targets, pending notices /
+  transactions, per-target warning counts, and merge id
+- `--quiet` suppresses the summary line and dry-run diff output
+- `--no-warn` suppresses end-of-merge `LossWarning` errata
+- `--profile <name>` applies a named overlay from `profiles`
+
+### `status`
+
+```sh
+uv run chameleon status
+```
+
+Shows whether neutral exists, whether each target is clean or drifting, and
+whether there are pending notices or unresolved transactions. Exit code is `1`
+if anything is dirty or pending.
+
+### `diff`
+
+```sh
+uv run chameleon diff
+uv run chameleon diff claude
+uv run chameleon diff codex
+```
+
+Shows unified diff from state-repo `HEAD` to the live target file(s). Exit code
+matches git-style diff behavior: `0` clean, `1` drift, `>1` error.
+
+### `log`
+
+```sh
+uv run chameleon log claude
+uv run chameleon log codex
+```
+
+Shows the per-target state-repo history.
+
+### `adopt`
+
+```sh
+uv run chameleon adopt claude
+uv run chameleon adopt codex
+```
+
+Resolve every conflict in favor of the chosen target, then propagate that back
+through neutral and out to the other targets.
+
+### `discard`
+
+```sh
+uv run chameleon discard claude
+uv run chameleon discard codex --yes
+```
+
+Restore live target files from the state-repo `HEAD`. This is intentionally
+guarded: off a TTY you must pass `--yes`.
+
+For partial-owned files, Chameleon only rewrites the keys it owns. Today that
+matters for `~/.claude.json`, where it preserves keys outside `mcpServers`.
+
+### `validate`
+
+```sh
+uv run chameleon validate
+```
+
+Schema-validates `neutral.yaml`.
+
+### `doctor`
+
+```sh
+uv run chameleon doctor
+uv run chameleon doctor --notices-only
+uv run chameleon doctor --clear-notices
+```
+
+Shows Chameleon version, resolved paths, pending operator notices, and unresolved
+transaction markers from interrupted merges.
+
+### `targets`
+
+```sh
+uv run chameleon targets list
+```
+
+Lists built-in and plugin-provided targets discovered through the
+`chameleon.targets` entry point.
+
+### `resolutions`
+
+```sh
+uv run chameleon resolutions list
+uv run chameleon resolutions clear
+uv run chameleon resolutions clear 'identity.model[claude]' --yes
+```
+
+Inspects or clears stored interactive conflict decisions.
+
+## Neutral schema
+
+The neutral schema is centered in `src/chameleon/schema/`. It has eight
+top-level domains:
+
+- `identity`
+- `directives`
+- `capabilities`
+- `authorization`
+- `environment`
+- `lifecycle`
+- `interface`
+- `governance`
+
+Plus:
+
+- `profiles`: named overlays applied with `merge --profile <name>`
+- `targets.<target>.items`: pass-through bag for target-only features
+- `resolutions`: stored conflict decisions
+
+The rule is simple: codecs adapt to the neutral schema. They do not redefine
+it.
+
+## Round-trip guarantees
+
+Round-trip is the design center.
+
+For settings Chameleon claims, the goal is:
+
+```text
+from_target(to_target(x)) == canonicalize(x)
+```
+
+When a target has features the other target cannot represent, Chameleon does
+not silently drop them. It uses one of two escape hatches:
+
+- typed `LossWarning`s for genuinely lossy cross-target translations
+- per-target pass-through under `targets.<target>.items`
+
+Examples in the current implementation:
+
+- plugin and marketplace state is reconciled across targets rather than
+  flattened to one side
+- target-specific extras can survive under `targets.claude.items` or
+  `targets.codex.items`
+- interrupted merges leave transaction markers instead of disappearing into logs
+
+## Repository-backed workflow
+
+The local state repos are a core part of the operator workflow:
+
+- `status` checks drift against them
+- `diff` shows what changed since `HEAD`
+- `log` gives you a timeline
+- `discard` restores from `HEAD`
+- merges commit new snapshots with a merge id trailer
+
+This gives Chameleon a memory that is stronger than "last file on disk", while
+still staying local and inspectable.
+
+## Plugin targets
+
+New targets register through the `chameleon.targets` entry point.
+
+At a minimum a plugin provides:
+
+- a `Target` class
+- an assembler with file routing
+- eight codec classes, one per neutral domain
+- vendored `_generated.py` models derived from the upstream schema
+
+See `docs/plugins/authoring.md`.
 
 ## Development
 
+Install dependencies:
+
 ```sh
-uv run pytest             # full test suite (unit / property / integration / conflicts / ...)
+uv sync
+```
+
+Before calling work complete, all four local gates must pass:
+
+```sh
 uv run ruff check
 uv run ruff format --check
 uv run ty check
+uv run pytest
 ```
 
-CI runs all four gates on Linux + macOS for Python 3.12 and 3.13 — see
-`.github/workflows/ci.yml`. CI deliberately does **not** exercise the
-schema-sync pipeline (Rust + network); refresh upstream-canonized
-schemas locally:
+The default pytest run excludes the longer fuzz suite. Run it explicitly with:
+
+```sh
+uv run pytest -m fuzz
+```
+
+The repo also carries integration tests that pin the important operator-facing
+behavior:
+
+- exemplar end-to-end round-trip
+- byte-stable idempotency across repeated merges
+- login recipe docs staying aligned with the real CLI
+- schema drift against vendored upstream models
+
+CI runs the four standard gates on macOS and Linux, across Python 3.12 and
+3.13.
+
+## Schema sync
+
+Generated codec models under `src/chameleon/codecs/*/_generated.py` are vendored
+artifacts. Do not hand-edit them.
+
+When you intentionally refresh an upstream schema:
 
 ```sh
 uv run --group schema-sync python tools/sync-schemas/sync.py claude
-uv run --group schema-sync python tools/sync-schemas/sync.py codex   # auto-clones codex-rs
+uv run --group schema-sync python tools/sync-schemas/sync.py codex
 ```
 
-The codex sync auto-clones `openai/codex` at the SHA pinned in
-`tools/sync-schemas/pins.toml` into `vendor/codex-rs/` (gitignored), so
-you don't need a manual checkout — just a working `cargo` and network.
+The Codex sync uses the pinned upstream revision from
+`tools/sync-schemas/pins.toml`.
 
-See `AGENTS.md` for full contribution conventions (also symlinked at
-`CLAUDE.md` for Claude Code's per-repo guidance).
+## Status
+
+Chameleon is pre-1.0 and still tightening parity edges, but the current shape
+is already practical:
+
+- repo-backed neutral config
+- bidirectional Claude/Codex reconciliation
+- unattended login-time merge hooks
+- interactive conflict resolution with stored decisions
+- plugin target expansion path
 
 ## License
 
-MIT — see `LICENSE`.
+MIT. See `LICENSE`.

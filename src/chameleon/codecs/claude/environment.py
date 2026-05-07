@@ -1,6 +1,6 @@
 """Claude codec for environment.variables — maps directly to settings.json `env`.
 
-Wave-10 §15.x — ``environment.inherit`` (``InheritPolicy`` enum: ``all``,
+``environment.inherit`` (``InheritPolicy`` enum: ``all``,
 ``core``, ``none``) has no Claude analogue. Claude inherits the parent
 shell environment unconditionally; selectively inheriting a subset is
 not configurable through ``settings.json``. The codec emits a typed
@@ -34,7 +34,7 @@ class ClaudeEnvironmentCodec:
     @staticmethod
     def to_target(model: Environment, ctx: TranspileCtx) -> ClaudeEnvironmentSection:
         if model.inherit is not None:
-            # Wave-10 §15.x — Claude has no inherit-policy setting.
+            # Claude has no inherit-policy setting.
             ctx.warn(
                 LossWarning(
                     domain=Domains.ENVIRONMENT,

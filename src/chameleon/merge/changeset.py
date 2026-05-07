@@ -1,4 +1,4 @@
-"""Four-source change model (§4.3) with typed classification.
+"""Four-source change model with typed classification.
 
 Per-FieldPath classification (P2-1)
 -----------------------------------
@@ -7,7 +7,7 @@ The merge engine doesn't classify whole domains as opaque blobs — it
 walks the neutral schema field-by-field via :func:`walk_changes` and
 emits one :class:`ChangeRecord` per leaf. The walker special-cases
 ``dict[TargetId, V]``-shaped fields (the ``Mapping[TargetId, V]``
-pattern from §7.1: ``identity.model``, ``identity.endpoint.base_url``,
+pattern from: ``identity.model``, ``identity.endpoint.base_url``,
 …). For those, each ``TargetId`` key becomes its own record with
 ``target_key`` set, and only that target's reverse-codec evidence
 contributes to the per-target side: other targets' codecs cannot
@@ -85,7 +85,7 @@ from collections.abc import Mapping
 from enum import Enum
 from typing import Any, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
 from chameleon.schema._constants import Domains
@@ -125,6 +125,8 @@ class ChangeRecord(BaseModel):
     per_target: dict[TargetId, Any]
     target_key: TargetId | None = None
     dict_key: str | None = None
+    neutral_mtime_ns: int | None = None
+    per_target_mtime_ns: dict[TargetId, int] = Field(default_factory=dict)
     authored: bool = True
     """Whether this leaf path was explicitly authored in N₁'s raw YAML.
 
@@ -163,7 +165,7 @@ class ChangeClassification(BaseModel):
 
 
 def classify_change(record: ChangeRecord) -> ChangeClassification:
-    """Apply §5.3's classification table."""
+    """Apply's classification table."""
     n0 = record.n0
     n1 = record.n1
 

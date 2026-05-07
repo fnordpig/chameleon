@@ -285,7 +285,7 @@ class EngineStateMachine(RuleBasedStateMachine):
     def crash_mid_merge(self) -> None:
         """Inject a crash on the first live-file write and assert the marker survives.
 
-        The recovery contract (§4.6) says the engine MUST persist a
+        The recovery contract says the engine MUST persist a
         transaction marker before any live target file mutation, so a
         post-crash inspection (``chameleon doctor``) can surface the
         interruption. We exercise that promise here.
@@ -413,7 +413,7 @@ class EngineStateMachine(RuleBasedStateMachine):
     def lkg_matches_neutral_after_successful_merge(self) -> None:
         """After a successful merge the LKG bytes equal the neutral bytes.
 
-        The engine's contract (§4.3 step 9) is that ``neutral.yaml`` and
+        The engine's contract ( step 9) is that ``neutral.yaml`` and
         ``neutral.lkg.yaml`` are written from the same ``composed_yaml``
         string. If they ever diverge after a clean merge, the next merge
         will see false drift and produce a phantom conflict.
@@ -523,7 +523,7 @@ if _active_profile == "fuzz":
         # whittling the trajectory and ultimately gives up. Shrinking is
         # only valuable when you intend to debug the falsifying example —
         # while the bug is xfail'd, the shrink budget is pure waste.
-        # Re-enable when removing the xfail in Wave-11.
+        # Re-enable when removing the xfail in .
         phases=tuple(p for p in Phase if p.name != "shrink"),
         suppress_health_check=[
             HealthCheck.too_slow,
@@ -558,7 +558,7 @@ else:
 EngineStateMachine.TestCase.settings = _state_machine_settings
 
 # ---------------------------------------------------------------------------
-# Wave-11 candidate: this rig consistently surfaces an idempotency / non-
+#  candidate: this rig consistently surfaces an idempotency / non-
 # determinism violation when adversarial neutral edits flow through the
 # Claude vs. Codex codec split. Failing trajectories share a structural
 # pattern across every seed we have observed:
@@ -566,7 +566,7 @@ EngineStateMachine.TestCase.settings = _state_machine_settings
 #   bootstrap → edit_neutral(...adversarial governance / identity /
 #   capabilities content...) → merge_twice_idempotent.
 #
-# Suspected contributing factors (Wave-11 triage to confirm):
+# Suspected contributing factors ( triage to confirm):
 #   * Codex governance codec collapses overlapping / duplicated
 #     `trust.trusted_paths` and `trust.untrusted_paths` entries through
 #     a `projects` dict — last-write-wins, not value-preserving.
@@ -584,7 +584,7 @@ EngineStateMachine.TestCase.settings = _state_machine_settings
 #   forces a follow-up: any future fix that makes the property hold
 #   flips the test to XPASS, which strict-mode then turns into a
 #   failure — the operator removing the xfail and locking in the
-#   property is part of the close-out checklist for the Wave-11 fix.
+#   property is part of the close-out checklist for the  fix.
 #
 # Determinism note
 #   ``derandomize=True`` plus the post-shrinking-disabled phase tuple
@@ -592,12 +592,12 @@ EngineStateMachine.TestCase.settings = _state_machine_settings
 #   runs without spending the shrink budget on a known-broken case.
 # ---------------------------------------------------------------------------
 
-# Wave-11 closed the non-idempotency. Three independent fixes combined to
+#  closed the non-idempotency. Three independent fixes combined to
 # flip this xfail to passing:
-#   - W11-1+1b: McpServerStdio.cwd preserved on both sides (parity/wave11-fcwd-*)
+#   - W11-1+1b: McpServerStdio.cwd preserved on both sides
 #   - W11-2:    Codex marketplace round-trip preservation via chameleon-namespaced
-#               extras for kind='github'/'url' and auto_update (parity/wave11-fmp-*)
+#               extras for kind='github'/'url' and auto_update
 #   - W11-4:    Trust path canonicalisation at neutral schema construction
-#               (parity/wave11-didem-governance-asymmetry) — the model_validator
+#               — the model_validator
 #               eliminates the duplicate-collapse class entirely.
 TestEngineStateMachine = EngineStateMachine.TestCase

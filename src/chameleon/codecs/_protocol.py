@@ -1,6 +1,6 @@
 """Codec, Assembler, and TranspileCtx protocol/types.
 
-Per §8.1 of the design spec: codecs are pure function pairs that
+codecs are pure function pairs that
 consume typed Pydantic models and produce typed Pydantic models. The
 disassembler routes input by typed field-path traversal; codecs never
 touch raw dicts.

@@ -31,6 +31,7 @@ def test_domains_values_are_lowercase_yaml_keys() -> None:
 def test_on_conflict_strategies() -> None:
     assert {s.name for s in OnConflict} == {
         "FAIL",
+        "LATEST",
         "KEEP",
         "PREFER_TARGET",
         "PREFER_NEUTRAL",

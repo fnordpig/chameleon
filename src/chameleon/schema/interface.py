@@ -1,8 +1,8 @@
 """interface domain — human-facing UX (TUI, voice, notifications).
 
-V0: typed schema only; codecs deferred (§15.3).
+V0: typed schema only; codecs deferred.
 
-P1-C: voice promoted from a flat bool to a structured object. The
+voice promoted from a flat bool to a structured object. The
 upstream Claude `~/.claude/settings.json` carries both a documented
 ``voiceEnabled: bool`` and an undocumented ``voice: {enabled, mode}``
 object. We model the richer shape so the dictation mode survives
