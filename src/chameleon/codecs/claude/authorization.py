@@ -1,12 +1,9 @@
 """Claude codec for the authorization domain.
 
-V0 thin slice (Wave-13 S1 schema rename — codec body is unchanged
-mechanically because we only renamed the type, not its values; S2 will
-rewrite this codec to consume the LCD schema's new ``permission_mode``
-and ``approval_policy`` fields):
+Wave-13 S2 — Claude consumes the LCD-aligned schema split:
 
-  sandbox_mode                          ↔ permissions.defaultMode
-                                          + sandbox.enabled (full-access → False)
+  permission_mode                       ↔ permissions.defaultMode
+                                          (Claude IS this axis — lossless)
   filesystem.{allow,deny}_{read,write}  ↔ sandbox.filesystem.{allow,deny}{Read,Write}
   network.{allowed,denied}_domains      ↔ sandbox.network.{allowed,denied}Domains
   network.allow_local_binding           ↔ sandbox.network.allowLocalBinding
@@ -14,15 +11,29 @@ and ``approval_policy`` fields):
   ask_patterns                          ↔ permissions.ask
   deny_patterns                         ↔ permissions.deny
 
-Mapping rationale (and known asymmetries):
-  - neutral.sandbox_mode "read-only"      → defaultMode "default"      + sandbox.enabled True
-  - neutral.sandbox_mode "workspace-write"→ defaultMode "acceptEdits"  + sandbox.enabled True
-  - neutral.sandbox_mode "full-access"    → defaultMode "bypassPermissions" + sandbox.enabled False
-  Reverse uses the same table; unrecognized values warn and drop.
+LCD asymmetries (codec emits ``LossWarning`` on encode):
 
-This is the V0 codec for §15.1 — the full design (granular approval
-policy, additional_directories, named permission profiles) lands in
-the authorization spec.
+  * ``sandbox_mode`` is a Codex-only axis. Claude has no equivalent —
+    the codec drops it on encode (no synthesis attempt) with a typed
+    warning so the operator knows the field is Codex-side only.
+  * ``approval_policy`` is a Codex-only axis. Same disposition.
+  * ``reviewer`` is Codex-only (P1-G). Same disposition (existing).
+
+LCD asymmetries (codec emits ``LossWarning`` on decode):
+
+  * Claude's ``permissions.defaultMode`` has 7 wire values; the LCD
+    ``PermissionMode`` enum only models 3 (``default``/``acceptEdits``/
+    ``plan``). The other 4 (``auto``, ``dontAsk``, ``bypassPermissions``,
+    ``delegate``) round-trip via the pass-through bag rather than enter
+    neutral. The codec emits a typed warning when the wire carries one
+    of those values; the value itself survives via the assembler's
+    extras-merge mechanism (``permissions`` is a section with
+    ``extra='allow'``).
+
+The DSL stays where it lives: this codec does NOT translate Claude's
+pattern allow-lists into Codex's structured permission profiles or vice
+versa. Each target's pattern surface is target-native; cross-target
+translation is explicitly out of scope for the LCD.
 """
 
 from __future__ import annotations
@@ -38,7 +49,7 @@ from chameleon.schema.authorization import (
     Authorization,
     FilesystemPolicy,
     NetworkPolicy,
-    SandboxMode,
+    PermissionMode,
 )
 
 
@@ -66,8 +77,13 @@ class _ClaudeSandboxNetwork(BaseModel):
 
 
 class _ClaudeSandbox(BaseModel):
+    # ``extra='allow'`` covers the rest of Claude's wire ``sandbox`` keys
+    # (``enabled``, ``ignoreViolations``, ``excludedCommands``,
+    # ``autoAllowBashIfSandboxed``, ``enableWeakerNetworkIsolation``,
+    # ``enableWeakerNestedSandbox``, ``allowUnsandboxedCommands``,
+    # ``ripgrep``); they round-trip as section extras through the
+    # assembler's existing-extras merge.
     model_config = ConfigDict(extra="allow")
-    enabled: bool | None = None
     filesystem: _ClaudeSandboxFilesystem = Field(default_factory=_ClaudeSandboxFilesystem)
     network: _ClaudeSandboxNetwork = Field(default_factory=_ClaudeSandboxNetwork)
 
@@ -78,15 +94,16 @@ class ClaudeAuthorizationSection(BaseModel):
     sandbox: _ClaudeSandbox = Field(default_factory=_ClaudeSandbox)
 
 
-_SANDBOX_MODE_TO_CLAUDE: dict[SandboxMode, tuple[str, bool]] = {
-    SandboxMode.READ_ONLY: ("default", True),
-    SandboxMode.WORKSPACE_WRITE: ("acceptEdits", True),
-    SandboxMode.FULL_ACCESS: ("bypassPermissions", False),
+# LCD permission_mode <-> wire defaultMode mapping. Wire uses camelCase
+# (``acceptEdits``); neutral uses snake_case (``accept_edits``). The
+# codec owns the rename so the schema's enum reads cleanly in YAML.
+_PERMISSION_MODE_TO_WIRE: dict[PermissionMode, str] = {
+    PermissionMode.DEFAULT: "default",
+    PermissionMode.ACCEPT_EDITS: "acceptEdits",
+    PermissionMode.PLAN: "plan",
 }
-_CLAUDE_TO_SANDBOX_MODE: dict[str, SandboxMode] = {
-    "default": SandboxMode.READ_ONLY,
-    "acceptEdits": SandboxMode.WORKSPACE_WRITE,
-    "bypassPermissions": SandboxMode.FULL_ACCESS,
+_WIRE_TO_PERMISSION_MODE: dict[str, PermissionMode] = {
+    wire: mode for mode, wire in _PERMISSION_MODE_TO_WIRE.items()
 }
 
 
@@ -100,7 +117,6 @@ class ClaudeAuthorizationCodec:
             FieldPath(segments=("permissions", "ask")),
             FieldPath(segments=("permissions", "deny")),
             FieldPath(segments=("permissions", "defaultMode")),
-            FieldPath(segments=("sandbox", "enabled")),
             FieldPath(segments=("sandbox", "filesystem", "allowRead")),
             FieldPath(segments=("sandbox", "filesystem", "allowWrite")),
             FieldPath(segments=("sandbox", "filesystem", "denyRead")),
@@ -114,10 +130,32 @@ class ClaudeAuthorizationCodec:
     @staticmethod
     def to_target(model: Authorization, ctx: TranspileCtx) -> ClaudeAuthorizationSection:
         section = ClaudeAuthorizationSection()
+        if model.permission_mode is not None:
+            section.permissions.defaultMode = _PERMISSION_MODE_TO_WIRE[model.permission_mode]
         if model.sandbox_mode is not None:
-            mode, sandbox_enabled = _SANDBOX_MODE_TO_CLAUDE[model.sandbox_mode]
-            section.permissions.defaultMode = mode
-            section.sandbox.enabled = sandbox_enabled
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.AUTHORIZATION,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "Authorization.sandbox_mode is a Codex-only axis (no Claude wire "
+                        "equivalent); dropping on Claude encode. Set this field for Codex; "
+                        "Claude's coarse mode lives in Authorization.permission_mode."
+                    ),
+                )
+            )
+        if model.approval_policy is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.AUTHORIZATION,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "Authorization.approval_policy is a Codex-only axis (no Claude wire "
+                        "equivalent); dropping on Claude encode. Set this field for Codex; "
+                        "Claude's per-prompt disposition lives in Authorization.permission_mode."
+                    ),
+                )
+            )
         section.permissions.allow = list(model.allow_patterns)
         section.permissions.ask = list(model.ask_patterns)
         section.permissions.deny = list(model.deny_patterns)
@@ -162,18 +200,20 @@ class ClaudeAuthorizationCodec:
     def from_target(section: ClaudeAuthorizationSection, ctx: TranspileCtx) -> Authorization:
         auth = Authorization()
         if section.permissions.defaultMode is not None:
-            mapped = _CLAUDE_TO_SANDBOX_MODE.get(section.permissions.defaultMode)
+            mapped = _WIRE_TO_PERMISSION_MODE.get(section.permissions.defaultMode)
             if mapped is not None:
-                auth.sandbox_mode = mapped
+                auth.permission_mode = mapped
             else:
                 ctx.warn(
                     LossWarning(
                         domain=Domains.AUTHORIZATION,
                         target=BUILTIN_CLAUDE,
                         message=(
-                            f"permissions.defaultMode "
+                            f"Claude permissions.defaultMode "
                             f"{section.permissions.defaultMode!r} has no neutral "
-                            f"equivalent in V0 (§15.1)"
+                            "PermissionMode equivalent (LCD only models "
+                            "default/acceptEdits/plan); routing to "
+                            "targets.claude.items['permissions'].defaultMode"
                         ),
                     )
                 )
