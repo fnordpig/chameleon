@@ -133,7 +133,7 @@ parity branch.
 
 ### Tests
 
-- 130 (0.1.0) → 286 (0.2.0) → **410 passing + 25 skipped + 70 fuzz
+- 130 (0.1.0) → 286 (0.2.0) → **415 passing + 25 skipped + 70 fuzz
   (deselected)** at 0.3.0. The default suite is the gate; the fuzz
   marker is opt-in (`uv run pytest -m fuzz`) and runs in CI nightly.
 - **Zero strict-xfails on the default suite.** The three transaction-
@@ -160,18 +160,6 @@ parity branch.
   (Claude is pattern-based and unbounded; Codex is profile-based and
   named) so unification is not a single codec edit. Tracked for a
   separate spec; will not ship in a 0.3.x patch.
-- **Five `tests/property/test_codex_trust_lossy.py` failures.** The
-  A-TRUST test suite (commit `e34d819`, Wave-11) was authored against
-  the pre-D-IDEM Trust schema and feeds the codec inputs that contain
-  duplicate paths in-list. After the D-IDEM fix (commit `d329099`),
-  the `Trust` constructor canonicalises those inputs before they reach
-  the codec, so the codec never sees the duplicate-bearing shape these
-  tests were written to exercise. The lossy-collapse contract itself
-  is still upheld — the fuzzers and exemplar tests confirm it — but
-  the unit-level tests need a rework to drive the codec via the
-  pre-canonicalisation entry point. **This is a known test-only gap,
-  not a runtime regression**; the operator-visible Trust round-trip
-  is correct on both targets.
 - **Windows still untested.** `fcntl`-based partial-ownership writes
   remain POSIX-only by design. Unchanged from 0.1.0.
 
