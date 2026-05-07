@@ -14,7 +14,7 @@ from chameleon._types import TargetId
 from chameleon.merge.changeset import ChangeSource
 from chameleon.merge.conflict import Conflict
 from chameleon.schema._constants import OnConflict
-from chameleon.schema.neutral import ResolutionDecisionKind
+from chameleon.schema.neutral import Resolution, ResolutionDecisionKind
 
 
 class ResolverOutcome(BaseModel):
@@ -136,6 +136,33 @@ class InteractiveResolver:
     def __init__(self, console: Console | None = None) -> None:
         self.console = console or Console(stderr=True)
 
+    @staticmethod
+    def _format_prior_decision(prior: Resolution) -> str:
+        """Render a one-line summary of a prior decision (W15-B §6.2).
+
+        Used to give the operator context when re-prompting because the
+        invalidation hash drifted. Informational only — the operator must
+        still answer the prompt explicitly; the prior is NOT pre-filled.
+        """
+        decision = prior.decision
+        if decision is ResolutionDecisionKind.TAKE_TARGET:
+            target_name = (
+                prior.decision_target.value if prior.decision_target is not None else "target"
+            )
+            chose = f"[bold]{target_name}[/]"
+        elif decision is ResolutionDecisionKind.TAKE_NEUTRAL:
+            chose = "[bold]neutral[/]"
+        elif decision is ResolutionDecisionKind.TAKE_LKG:
+            chose = "[bold]revert to N₀ (last-known-good)[/]"
+        elif decision is ResolutionDecisionKind.TARGET_SPECIFIC:
+            chose = "[bold]target-specific (per-target preserved)[/]"
+        else:  # SKIP
+            chose = "[bold]skipped[/]"
+        when = prior.decided_at.strftime("%Y-%m-%d %H:%M")
+        return (
+            f"[bold yellow]Prior decision[/]: chose {chose} on {when} (values have changed since)"
+        )
+
     def resolve(self, conflict: Conflict) -> ResolverOutcome:
         record = conflict.record
         path_label = record.render_path()
@@ -174,13 +201,20 @@ class InteractiveResolver:
                     break
 
         self.console.print(table)
+        # Render the prior decision as informational context above the
+        # choice banner when the engine populated one (W15-B §6.2). The
+        # prior does NOT pre-fill the choice — the operator must answer.
+        if conflict.prior_decision is not None:
+            self.console.print(self._format_prior_decision(conflict.prior_decision))
         self.console.print(
             "[dim]choose: "
             + " / ".join(f"[bold]{letter}[/]" for letter in choices)
-            + " / [bold]k[/] revert to N₀ / [bold]s[/] skip[/]"
+            + " / [bold]k[/] revert to N₀"
+            " / [bold]t[/] target-specific"
+            " / [bold]s[/] skip[/]"
         )
 
-        valid = [*choices.keys(), "k", "s"]
+        valid = [*choices.keys(), "k", "t", "s"]
         choice = Prompt.ask(
             f"resolve [cyan]{path_label}[/]",
             choices=valid,
@@ -199,6 +233,17 @@ class InteractiveResolver:
             return ResolverOutcome(
                 decision=ResolutionDecisionKind.TAKE_LKG,
                 value=record.n0,
+                persist=True,
+            )
+        if choice == "t":
+            # TARGET_SPECIFIC: no unified value; the engine patches each
+            # target's overlay with that target's current value. The
+            # resolver carries no specific decision_target — the engine
+            # handles per-target preservation symmetrically.
+            return ResolverOutcome(
+                decision=ResolutionDecisionKind.TARGET_SPECIFIC,
+                decision_target=None,
+                value=None,
                 persist=True,
             )
         src, tid, val = choices[choice]
