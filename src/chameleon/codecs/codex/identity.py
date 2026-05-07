@@ -54,6 +54,18 @@ _CODEX_TO_AUTH_METHOD: dict[ForcedLoginMethod, AuthMethod] = {
 }
 
 
+def _collapse_user_home(path: str) -> str:
+    """Serialize local-home paths portably in neutral YAML."""
+    home = os.path.normpath(os.path.expanduser("~"))
+    normalized = os.path.normpath(path)
+    if normalized == home:
+        return "~"
+    home_prefix = f"{home}{os.sep}"
+    if normalized.startswith(home_prefix):
+        return f"~/{normalized.removeprefix(home_prefix)}"
+    return path
+
+
 class CodexIdentitySection(BaseModel):
     model_config = ConfigDict(extra="allow")
     model: str | None = None
@@ -87,6 +99,16 @@ class CodexIdentityCodec:
             FieldPath(segments=("model_catalog_json",)),
             # auth.method:
             FieldPath(segments=("forced_login_method",)),
+        }
+    )
+    neutral_claimed_paths: ClassVar[frozenset[FieldPath]] = frozenset(
+        {
+            FieldPath(segments=("identity", "model")),
+            FieldPath(segments=("identity", "reasoning_effort")),
+            FieldPath(segments=("identity", "context_window")),
+            FieldPath(segments=("identity", "compact_threshold")),
+            FieldPath(segments=("identity", "model_catalog_path")),
+            FieldPath(segments=("identity", "auth", "method")),
         }
     )
 
@@ -170,7 +192,7 @@ class CodexIdentityCodec:
         if section.model_auto_compact_token_limit is not None:
             ident.compact_threshold = section.model_auto_compact_token_limit
         if section.model_catalog_json is not None:
-            ident.model_catalog_path = section.model_catalog_json
+            ident.model_catalog_path = _collapse_user_home(section.model_catalog_json)
         # reverse mapping for forced_login_method.
         if section.forced_login_method is not None:
             try:

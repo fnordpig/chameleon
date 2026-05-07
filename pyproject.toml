@@ -3,7 +3,10 @@ requires = ["hatchling>=1.21"]
 build-backend = "hatchling.build"
 
 [project]
-name = "chameleon"
+# Distribution name on PyPI. The import name remains `chameleon`
+# (see [tool.hatch.build.targets.wheel] below). The PyPI distribution
+# name is `chameleon-ai` because `chameleon` was already taken.
+name = "chameleon-ai"
 description = "Transpile a neutral agent configuration into Claude Code, Codex CLI, and other agent-specific formats — and back again."
 readme = "README.md"
 requires-python = ">=3.12"

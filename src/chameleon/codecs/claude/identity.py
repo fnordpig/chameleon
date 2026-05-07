@@ -92,6 +92,15 @@ class ClaudeIdentityCodec:
             FieldPath(segments=("apiKeyHelper",)),
         }
     )
+    neutral_claimed_paths: ClassVar[frozenset[FieldPath]] = frozenset(
+        {
+            FieldPath(segments=("identity", "model")),
+            FieldPath(segments=("identity", "reasoning_effort")),
+            FieldPath(segments=("identity", "thinking")),
+            FieldPath(segments=("identity", "auth", "method")),
+            FieldPath(segments=("identity", "auth", "api_key_helper")),
+        }
+    )
 
     @staticmethod
     def to_target(model: Identity, ctx: TranspileCtx) -> ClaudeIdentitySection:

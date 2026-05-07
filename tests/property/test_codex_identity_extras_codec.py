@@ -61,6 +61,18 @@ def test_model_catalog_path_expands_user_home(monkeypatch: pytest.MonkeyPatch) -
     assert section.model_catalog_json == "/Users/exampleuser/.codex/model-catalog-600k.json"
 
 
+def test_model_catalog_path_collapses_user_home_on_import(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", "/Users/exampleuser")
+    section = CodexIdentitySection(
+        model_catalog_json="/Users/exampleuser/.codex/model-catalog-600k.json"
+    )
+    ctx = TranspileCtx()
+    restored = CodexIdentityCodec.from_target(section, ctx)
+    assert restored.model_catalog_path == "~/.codex/model-catalog-600k.json"
+
+
 def test_round_trip_all_three_combined() -> None:
     orig = Identity(
         context_window=600000,

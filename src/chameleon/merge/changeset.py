@@ -324,6 +324,7 @@ def _walk_node(  # noqa: PLR0912, PLR0915 — single recursive switch over schem
     out: list[ChangeRecord],
     n1_authored: Any,
     n1_default: Any,
+    per_target_claimed_paths: Mapping[TargetId, frozenset[FieldPath]],
 ) -> None:
     """Recursively emit one ``ChangeRecord`` per leaf under this node.
 
@@ -348,6 +349,7 @@ def _walk_node(  # noqa: PLR0912, PLR0915 — single recursive switch over schem
 
         # The schema default for a `dict[TargetId, V]` field is `None`
         # or `{}`; in either case the per-key default is `None`.
+        field_path = FieldPath(segments=path_segments)
         for key_tid in keys:
             n0_key = n0_val.get(key_tid) if isinstance(n0_val, dict) else None
             n1_key = n1_val.get(key_tid) if isinstance(n1_val, dict) else None
@@ -365,6 +367,8 @@ def _walk_node(  # noqa: PLR0912, PLR0915 — single recursive switch over schem
             if isinstance(owner_val, dict) and key_tid in owner_val:
                 owner_key_val = owner_val[key_tid]
                 key_per_target = {key_tid: _serialize(owner_key_val)}
+            elif field_path in per_target_claimed_paths.get(key_tid, frozenset()):
+                key_per_target = {key_tid: None}
             else:
                 # The owning target had no live evidence for this key —
                 # emit no per-target evidence (silence ≠ drift).
@@ -458,6 +462,7 @@ def _walk_node(  # noqa: PLR0912, PLR0915 — single recursive switch over schem
                 out=out,
                 n1_authored=sub_authored,
                 n1_default=sub_default,
+                per_target_claimed_paths=per_target_claimed_paths,
             )
         return
 
@@ -477,15 +482,17 @@ def _walk_node(  # noqa: PLR0912, PLR0915 — single recursive switch over schem
     # claim this leaf produces a default value in its from_target output
     # (it has no other choice — the neutral domain model is shared).
     # That default isn't "the codec asserts empty"; it's "the codec has
-    # nothing to say." Exclude default-equal per-target evidence so the
-    # classifier doesn't false-conflict against a real signal from a
-    # peer target. To express "explicitly empty," a codec can use the
-    # schema's ``None | list``-shaped fields (where ``None`` is the
-    # default and ``[]`` is a non-default empty assertion).
+    # nothing to say." Exclude default-equal per-target evidence unless
+    # the codec explicitly declares ownership of this neutral path. When
+    # it does, the default is real target evidence: the target removed a
+    # previously-authored scalar.
+    field_path = FieldPath(segments=path_segments)
     pt_serialized: dict[TargetId, Any] = {}
     for tid, tv in per_target_vals.items():
         ser = _serialize(tv)
-        if ser != default_serialized:
+        if ser != default_serialized or field_path in per_target_claimed_paths.get(
+            tid, frozenset()
+        ):
             pt_serialized[tid] = ser
     out.append(
         ChangeRecord(
@@ -505,6 +512,7 @@ def walk_changes(
     per_target_neutrals: Mapping[TargetId, BaseModel],
     *,
     n1_authored: dict[str, object] | None = None,
+    per_target_claimed_paths: Mapping[TargetId, frozenset[FieldPath]] | None = None,
 ) -> list[ChangeRecord]:
     """Walk every neutral domain field-by-field, emitting per-leaf records.
 
@@ -526,6 +534,7 @@ def walk_changes(
     string introspection of attribute names.
     """
     out: list[ChangeRecord] = []
+    claimed_paths = per_target_claimed_paths or {}
     treat_all_authored = n1_authored is None
     # The schema default tree is the single source of truth for "what
     # would Pydantic produce from an empty input?" We compute it once
@@ -556,6 +565,7 @@ def walk_changes(
             out=out,
             n1_authored=sub_authored,
             n1_default=sub_default,
+            per_target_claimed_paths=claimed_paths,
         )
     return out
 

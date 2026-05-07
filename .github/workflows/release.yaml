@@ -110,6 +110,9 @@ jobs:
 
       - name: Publish to PyPI
         # pypa/gh-action-pypi-publish handles the OIDC dance + upload.
-        # Pinned to the v1.14.0 commit; bump via dependabot when a new
-        # release lands.
-        uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d  # v1.14.0
+        # Pinned to the release/v1 branch HEAD (composite action shape).
+        # The semver tags publish to GHCR via Dockerfile and the GHCR
+        # images aren't always pushed for arbitrary tag SHAs; pinning
+        # the long-lived release/v1 branch HEAD is the upstream-
+        # recommended pinning idiom for this action.
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1

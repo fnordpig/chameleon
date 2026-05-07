@@ -22,7 +22,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, TypeAdapter
 
-from chameleon._types import FileOwnership, TargetId
+from chameleon._types import FieldPath, FileOwnership, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge._diffs import FileDiff
@@ -426,6 +426,20 @@ def _gc_resolutions(composed: Neutral, per_target_neutral: dict[TargetId, Neutra
     composed.resolutions = Resolutions(items=survivors)
 
 
+def _neutral_claimed_paths(codec_cls: object) -> frozenset[FieldPath]:
+    """Return optional neutral leaf claims declared by a codec.
+
+    ``claimed_paths`` names target-wire fields. ``neutral_claimed_paths``
+    is intentionally separate: it marks neutral leaves where a default
+    coming back from the target means "this target cleared the setting",
+    not "this target has nothing to say."
+    """
+    raw = getattr(codec_cls, "neutral_claimed_paths", frozenset())
+    if not isinstance(raw, frozenset):
+        return frozenset()
+    return frozenset(path for path in raw if isinstance(path, FieldPath))
+
+
 class MergeRequest(BaseModel):
     """Inputs to a merge run beyond what the engine already knows."""
 
@@ -542,6 +556,7 @@ class MergeEngine:
         per_target_neutral: dict[TargetId, Neutral] = {}
         per_target_passthrough: dict[TargetId, dict[str, object]] = {}
         per_target_mtime_ns: dict[TargetId, int] = {}
+        per_target_claimed_paths: dict[TargetId, set[FieldPath]] = {}
 
         for tid in self.targets.target_ids():
             target_cls = self.targets.get(tid)
@@ -566,6 +581,9 @@ class MergeEngine:
                 except NotImplementedError:
                     continue
                 setattr(target_neutral, codec_cls.domain.value, fragment)
+                per_target_claimed_paths.setdefault(tid, set()).update(
+                    _neutral_claimed_paths(codec_cls)
+                )
 
             per_target_neutral[tid] = target_neutral
 
@@ -605,7 +623,15 @@ class MergeEngine:
                     "per_target_mtime_ns": per_target_mtime_ns,
                 }
             )
-            for rec in walk_changes(n0, n1, per_target_neutral, n1_authored=n1_raw)
+            for rec in walk_changes(
+                n0,
+                n1,
+                per_target_neutral,
+                n1_authored=n1_raw,
+                per_target_claimed_paths={
+                    tid: frozenset(paths) for tid, paths in per_target_claimed_paths.items()
+                },
+            )
         ]
         # Resolution-memory bookkeeping ().
         #

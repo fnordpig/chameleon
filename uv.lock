@@ -57,7 +57,7 @@ wheels = [
 ]
 
 [[package]]
-name = "chameleon"
+name = "chameleon-ai"
 source = { editable = "." }
 dependencies = [
     { name = "platformdirs" },
