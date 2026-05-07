@@ -216,3 +216,105 @@ prerequisite that should run in parallel with P0/P1 implementation.
    `enabledPlugins`.
 
 That's parity. Everything below is the work to get there.
+
+## Wave-11 §15.x schema reconciliation (2026-05-06)
+
+After Wave-10 Agents F (Claude) and G (Codex) implemented codecs for
+the 5 §15.x enum slots Wave-8 β identified as typed-but-unclaimed,
+both surfaced the same diagnosis: the §15.x neutral schemas were
+written without grounding against the targets' actual wire vocabulary.
+The result was a set of LossWarnings firing on every operator who
+touched those slots, with no observable behaviour change — the
+classic "speculation in the schema" smell.
+
+This section pins the per-slot Wave-11 reconciliation decisions.
+
+### Slot-by-slot decisions
+
+#### `identity.auth.method` — schema shrunk
+
+Original neutral: 6 values (OAUTH/API_KEY/BEDROCK/VERTEX/AZURE/NONE).
+Upstream wire reality:
+
+* Claude `ForceLoginMethod` (`_generated.py`): `claudeai`, `console`.
+* Codex `ForcedLoginMethod` (`_generated.py`): `chatgpt`, `api`.
+
+Neither target exposes `bedrock` / `vertex` / `azure` as an auth-method
+value. Claude reaches the AWS Bedrock / GCP Vertex provider lanes
+through per-provider env vars (`ANTHROPIC_BEDROCK_BASE_URL`,
+`CLAUDE_CODE_SKIP_BEDROCK_AUTH`, `ANTHROPIC_VERTEX_BASE_URL`,
+`ANTHROPIC_VERTEX_PROJECT_ID`, ...) which are owned by the
+`environment` codec. Codex talks exclusively to OpenAI / OSS providers
+and has no cloud-provider lane at all.
+
+**Decision:** shrink `AuthMethod` to `{OAUTH, API_KEY}`. Both values
+round-trip cleanly on both targets; the LossWarning paths on
+`to_target` for the removed values are gone with them. Defensive
+`wire is None` branches in the codecs remain so that a future schema
+growth without a corresponding wire mapping still warns rather than
+silently dropping.
+
+#### `directives.verbosity` — schema preserved, asymmetry pinned
+
+Original neutral: `Verbosity` = `{LOW, MEDIUM, HIGH}`. Codex's
+upstream `Verbosity` enum (model_verbosity, GPT-5 Responses API) is
+the same 3-element domain — round-trips lossless on Codex. Claude
+has no persistent verbosity setting; the field emits a typed
+`LossWarning` on every value when the Claude codec runs.
+
+**Decision:** leave the schema as-is. The asymmetric LossWarning
+behaviour is intentional and documented; the operator who sets
+`verbosity` knows it lands on Codex but not Claude.
+
+#### `capabilities.web_search` — schema preserved, asymmetry pinned
+
+Original neutral: `Literal["cached", "live", "disabled"]`. Codex's
+`WebSearchMode` enum is the same 3-element domain — round-trips
+lossless on Codex. Claude gates web search via `permissions` tool
+patterns rather than a tri-state axis, so this field emits a
+`LossWarning` on the Claude codec.
+
+**Decision:** leave the schema as-is. The asymmetry is structural
+(different gating model on Claude); forcing Claude to fake one of
+these three values would be lossy in a worse way.
+
+#### `environment.inherit` — schema preserved, asymmetry pinned
+
+Original neutral: `InheritPolicy` = `{ALL, CORE, NONE}`. Codex's
+`shell_environment_policy.inherit` 3-arm RootModel union is the
+same 3-element domain — round-trips lossless on Codex. Claude
+inherits the parent shell environment unconditionally with no
+analogue.
+
+**Decision:** leave the schema as-is. The Claude codec emits a
+typed `LossWarning` for every value; that's the honest signal.
+
+#### `lifecycle.history.persistence` — schema preserved, asymmetry pinned
+
+Original neutral: `HistoryPersistence` = `{SAVE_ALL, NONE}`. Codex's
+`HistoryPersistence` 2-arm RootModel union is the same 2-element
+domain — round-trips lossless on Codex. Claude's closest analogue is
+the `CLAUDE_CODE_SKIP_PROMPT_HISTORY` env var, which is owned by the
+`environment` codec; the Claude lifecycle codec emits a `LossWarning`
+on every value.
+
+**Decision:** leave the schema as-is. The asymmetry mirrors the
+target reality.
+
+### Reconciliation principle
+
+Schema values that no codec can claim on either side are pure
+speculation and should be removed. Schema values that one codec can
+claim and the other cannot are an honest asymmetry and stay (with a
+documented per-target `LossWarning`). The
+`tests/property/test_enum_exhaustion.py` harness is the static
+backstop: it makes "no codec claims this value" impossible to ignore
+because every (field, value, codec) cell shows up explicitly in the
+session-summary block.
+
+Wave-11 result: enum-exhaustion catalog shrank from 12 leaves / 72
+parametrised cases to 12 leaves / 66 cases (the 6 removed cases are
+3 deleted AuthMethod values × 2 codecs). The pass count stays at 41
+because the deleted cases were all LossWarning skips on both targets;
+the gap is now exclusively the structural asymmetries documented
+above, not phantom speculation.

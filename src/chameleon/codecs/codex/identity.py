@@ -12,12 +12,14 @@ P1-F — Codex-only identity tuning knobs (claimed here; no analogue in Claude):
   model_catalog_path -> model_catalog_json
 
 Wave-10 §15.x — auth.method:
-  Neutral ``AuthMethod`` has 5 values; Codex's ``ForcedLoginMethod`` enum
-  in ``_generated.py`` declares only ``chatgpt`` and ``api``. The two
-  cleanly-mapped values are ``OAUTH ↔ chatgpt`` and ``API_KEY ↔ api``.
-  ``BEDROCK`` / ``VERTEX`` / ``AZURE`` have no Codex analogue (Codex talks
-  exclusively to OpenAI / OSS providers), so encoding any of them emits a
-  typed ``LossWarning`` and leaves ``forced_login_method`` unset.
+  After Wave-11 §15.x reconciliation, neutral ``AuthMethod`` is the
+  same 2-element domain as Codex's upstream ``ForcedLoginMethod``:
+  ``OAUTH ↔ chatgpt`` and ``API_KEY ↔ api``. Both values round-trip
+  cleanly with no LossWarning on encode. The historical 5-value
+  AuthMethod (BEDROCK/VERTEX/AZURE) was removed because Codex talks
+  exclusively to OpenAI / OSS providers — those values had no wire
+  reality on either target (see ``schema/identity.py``). Decode still
+  warns on unknown wire values for forward-compat.
 
 The neutral schema uses cross-target vocabulary; this codec is the single
 place that maps neutral names to Codex's wire names. Round-trip preserves

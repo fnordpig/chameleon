@@ -7,17 +7,23 @@ Maps neutral.identity ↔ Claude settings.json keys:
   auth.method        -> forceLoginMethod  (Wave-10 §15.x slot, partial)
   auth.api_key_helper -> apiKeyHelper     (Wave-10 §15.x adjacent slot)
 
-Wave-10 §15.x — ``identity.auth.method`` is partially supported on Claude.
-Claude's wire enum ``ForceLoginMethod`` only models two of the five
-neutral ``AuthMethod`` values:
+Wave-10 §15.x — ``identity.auth.method`` is fully supported on Claude
+after Wave-11 §15.x reconciliation. Claude's wire enum
+``ForceLoginMethod`` (``_generated.py``) is a 2-element StrEnum and
+the neutral ``AuthMethod`` is now also two values:
   * ``oauth``   ↔ ``claudeai`` (OAuth into Claude.ai / Pro / Max)
   * ``api-key`` ↔ ``console``  (API-key billing flow into Console)
-The remaining values (``bedrock``, ``vertex``, ``azure``) have no
-``forceLoginMethod`` analogue — Claude reaches those provider lanes
-through the per-provider env vars in the ``env`` codec instead.
-``to_target`` emits a typed ``LossWarning`` when neutral selects one
-of those three; the value still round-trips through the Codex codec
-lane and any per-provider env config.
+Both values round-trip cleanly. The historical
+``BEDROCK``/``VERTEX``/``AZURE`` neutral values were removed in
+Wave-11 (see ``schema/identity.py``); those provider lanes are
+controlled through per-provider env vars
+(``ANTHROPIC_BEDROCK_BASE_URL``, ``ANTHROPIC_VERTEX_PROJECT_ID``,
+...), owned by the ``environment`` codec.
+
+Decode-time forward compat: if an unknown wire value lands in a
+disassembled ``forceLoginMethod`` (a future upstream growing a third
+method before Chameleon regenerates), ``from_target`` emits a typed
+``LossWarning`` and drops the value rather than crashing.
 
 P1-F — three Codex-only identity tuning knobs have no Claude analogue:
   context_window, compact_threshold, model_catalog_path
@@ -40,9 +46,12 @@ from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.identity import AuthMethod, Identity, IdentityAuth, ReasoningEffort
 
 # Wire bidirectional map for the two AuthMethod values Claude's
-# ``forceLoginMethod`` enum models. Other neutral values produce a
-# LossWarning at ``to_target`` time; unknown wire values produce a
-# LossWarning at ``from_target`` time.
+# ``forceLoginMethod`` enum models. After Wave-11 §15.x reconciliation
+# AuthMethod itself is also two values, so this map is total over the
+# neutral domain — the ``wire is None`` branch in ``to_target`` is now
+# defensive against a future schema growth (a value added without a
+# corresponding wire mapping). Unknown wire values still produce a
+# LossWarning at ``from_target`` time, for forward-compat with upstream.
 _AUTH_METHOD_TO_WIRE: dict[AuthMethod, str] = {
     AuthMethod.OAUTH: "claudeai",
     AuthMethod.API_KEY: "console",
