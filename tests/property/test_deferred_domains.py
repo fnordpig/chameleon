@@ -127,3 +127,55 @@ def test_codex_governance_round_trip_features_trust() -> None:
     assert restored.features == {"shell_tool": True, "fast_mode": True}
     assert restored.trust.trusted_paths == ["/repo/foo"]
     assert restored.trust.untrusted_paths == ["/tmp/sketchy"]
+
+
+# ---- Trust canonicalisation (Wave-11 D-IDEM regression) ---------------------
+#
+# The Codex governance codec serialises ``trust.{trusted,untrusted}_paths`` to
+# a path-keyed ``[projects."<path>"].trust_level`` map. Two natural list
+# shapes have no faithful representation in that wire model:
+#
+#   * Duplicate paths within a single list (a dict can't carry two values
+#     for the same key).
+#   * The same path in BOTH lists (the second write to ``projects."<path>"``
+#     overwrites the first).
+#
+# Both situations were the root cause of the Wave-9 state-machine fuzz's
+# ``merge_twice_idempotent`` violations on adversarial governance edits:
+# neutral ``[/a, /a]`` round-tripped to ``[/a]`` through the Codex codec,
+# the engine classified the difference as TARGET-source drift on the second
+# merge, and the per-target-CONSENSUAL re-derive overwrote N₁'s authored
+# duplicates. The canonical fix lives in the schema (``Trust._canonicalise_paths``)
+# rather than in either codec — neither target's wire shape supports the
+# non-canonical input, so neutral itself canonicalises on construction.
+
+
+def test_trust_dedupes_within_each_list() -> None:
+    """Repeated paths in a single list collapse to first-occurrence order."""
+    trust = Trust(trusted_paths=["/a", "/b", "/a", "/c"], untrusted_paths=["/x", "/x"])
+    assert trust.trusted_paths == ["/a", "/b", "/c"]
+    assert trust.untrusted_paths == ["/x"]
+
+
+def test_trust_overlap_resolves_to_untrusted_wins() -> None:
+    """A path in both lists is kept only on the untrusted side.
+
+    Matches the Codex codec's write order (``trusted`` first, ``untrusted``
+    overwrites) so the schema's canonical form and the Codex round-trip
+    agree on adversarial inputs without lossy classification.
+    """
+    trust = Trust(trusted_paths=["/a", "/b"], untrusted_paths=["/b", "/c"])
+    assert trust.trusted_paths == ["/a"]
+    assert trust.untrusted_paths == ["/b", "/c"]
+
+
+def test_trust_canonical_form_round_trips_through_codex() -> None:
+    """The post-canonicalisation Trust round-trips byte-identically."""
+    orig = Trust(trusted_paths=["/a", "/a", "/b"], untrusted_paths=["/c", "/b"])
+    # After canonicalisation: trusted=['/a'], untrusted=['/c', '/b']
+    governance = Governance(trust=orig)
+    ctx = TranspileCtx()
+    section = CodexGovernanceCodec.to_target(governance, ctx)
+    restored = CodexGovernanceCodec.from_target(section, ctx)
+    assert restored.trust.trusted_paths == orig.trusted_paths
+    assert restored.trust.untrusted_paths == orig.untrusted_paths
