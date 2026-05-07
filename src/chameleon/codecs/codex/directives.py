@@ -2,6 +2,12 @@
 
 V0: commit_attribution + system_prompt_file.
 P1-E: personality (fixed-vocabulary StrEnum mirroring upstream).
+Wave-10 §15.x: verbosity ↔ model_verbosity (Responses API ``text.verbosity``).
+
+Codex's ``model_verbosity`` is a top-level ``Verbosity`` enum
+(``low``/``medium``/``high``) on ``ConfigToml`` — exactly the same
+vocabulary as the neutral ``Verbosity`` enum, so the round-trip is a
+direct value-by-value lookup with no LossWarning paths.
 """
 
 from __future__ import annotations
@@ -13,8 +19,9 @@ from pydantic import BaseModel, ConfigDict
 from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex._generated import Personality as CodexPersonality
+from chameleon.codecs.codex._generated import Verbosity as CodexVerbosity
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
-from chameleon.schema.directives import Directives, Personality
+from chameleon.schema.directives import Directives, Personality, Verbosity
 
 
 class CodexDirectivesSection(BaseModel):
@@ -22,6 +29,8 @@ class CodexDirectivesSection(BaseModel):
     model_instructions_file: str | None = None
     commit_attribution: str | None = None
     personality: CodexPersonality | None = None
+    # Wave-10 §15.x — directives.verbosity ↔ model_verbosity.
+    model_verbosity: CodexVerbosity | None = None
 
 
 class CodexDirectivesCodec:
@@ -33,6 +42,8 @@ class CodexDirectivesCodec:
             FieldPath(segments=("model_instructions_file",)),
             FieldPath(segments=("commit_attribution",)),
             FieldPath(segments=("personality",)),
+            # Wave-10 §15.x:
+            FieldPath(segments=("model_verbosity",)),
         }
     )
 
@@ -44,10 +55,15 @@ class CodexDirectivesCodec:
         codex_personality = (
             CodexPersonality(model.personality.value) if model.personality is not None else None
         )
+        # Wave-10 §15.x — same StrEnum-by-value pattern as personality.
+        codex_verbosity = (
+            CodexVerbosity(model.verbosity.value) if model.verbosity is not None else None
+        )
         return CodexDirectivesSection(
             model_instructions_file=model.system_prompt_file,
             commit_attribution=model.commit_attribution,
             personality=codex_personality,
+            model_verbosity=codex_verbosity,
         )
 
     @staticmethod
@@ -55,10 +71,16 @@ class CodexDirectivesCodec:
         neutral_personality = (
             Personality(section.personality.value) if section.personality is not None else None
         )
+        neutral_verbosity = (
+            Verbosity(section.model_verbosity.value)
+            if section.model_verbosity is not None
+            else None
+        )
         return Directives(
             system_prompt_file=section.model_instructions_file,
             commit_attribution=section.commit_attribution,
             personality=neutral_personality,
+            verbosity=neutral_verbosity,
         )
 
 
