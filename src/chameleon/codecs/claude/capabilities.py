@@ -44,6 +44,15 @@ class _ClaudeMcpServerStdio(BaseModel):
     command: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    # F-CWD (Wave-11): the on-disk Claude MCP stdio entry carries an
+    # optional ``cwd`` (working directory) field — the same shape Codex
+    # and the upstream MCP spec model. Without it, ``McpServerStdio.cwd``
+    # silently dropped through ``to_target`` / ``from_target``: the
+    # neutral schema's first-class ``cwd: str | None`` was not carried
+    # by the Claude lane, and the cross-target fuzzer's
+    # ``test_decode_symmetry_via_cross_target[capabilities.mcp_servers]``
+    # caught the silent loss. Modelling it here closes the round-trip.
+    cwd: str | None = None
 
 
 class _ClaudeMcpServerHttp(BaseModel):
@@ -180,6 +189,7 @@ class ClaudeCapabilitiesCodec:
                     command=server.command,
                     args=list(server.args),
                     env=dict(server.env),
+                    cwd=server.cwd,
                 )
             elif isinstance(server, McpServerStreamableHttp):
                 section.mcpServers[name] = _ClaudeMcpServerHttp(
@@ -208,6 +218,7 @@ class ClaudeCapabilitiesCodec:
                     command=raw.command,
                     args=list(raw.args),
                     env=dict(raw.env),
+                    cwd=raw.cwd,
                 )
             elif isinstance(raw, _ClaudeMcpServerHttp):
                 # Use model_validate so Pydantic coerces the str URL into AnyHttpUrl;
