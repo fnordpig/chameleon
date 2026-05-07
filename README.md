@@ -12,34 +12,42 @@ across tools.
 
 ## Status
 
-**0.3.0 — pre-1.0, V1+ acceptance gate: smoke + fuzz, zero strict xfails.**
+**0.4.0 — pre-1.0, parity-gap DAG closed: LCD authorization shipped, zero strict xfails.**
 
 All eight schema domains — `identity`, `directives`, `capabilities`,
 `environment`, `authorization`, `lifecycle`, `interface`,
 `governance` — have working codecs for both targets, with documented
-`LossWarning`s where the two targets genuinely diverge. The richer
-authorization surface (Claude's `Bash(...)` permission patterns ↔
-Codex's named `[permissions.<name>]` profiles) is the last open
-architectural node from the original parity-gap DAG; it ships as
-`LossWarning`-only for now and gets its own design spec.
+`LossWarning`s where the two targets genuinely diverge. The original
+parity-gap DAG is closed: Wave-13's LCD (lowest-common-denominator)
+authorization scheme covers the structurally-common subset
+(`permission_mode` Claude-side, `sandbox_mode` and `approval_policy`
+Codex-side) losslessly on its claiming target and emits typed
+`LossWarning`s on cross-target encode. The rich cases — Claude's
+`Bash(...)` pattern-language permissions, Codex's named
+`[permissions.<name>]` profiles, Codex's granular discriminated-union
+approval — are intentionally NOT translated; they ride pass-through
+byte-faithfully and do not propagate cross-target. See
+`docs/superpowers/specs/2026-05-06-p3-authorization-design.md` for
+the design exploration.
 
-The 0.3.0 verification posture is **exhaustive proof + property fuzz**:
+The 0.4.0 verification posture is **exhaustive proof + property fuzz**:
 
 - **2119/2119** upstream wire fields statically accounted for (no
-  silent drops audit).
-- **27 finite-domain leaves** proved bijective by enumerating every
-  `enum.Enum` / `Literal` value.
+  silent drops audit, unchanged from 0.3.0; Codex `claimed
+  171 → 178`, `pass-through 528 → 521` reflects the LCD prefix-claims).
+- **Every finite-domain enum / `Literal` reachable from the neutral
+  schema** proved bijective by enumeration, including Wave-13's new
+  `PermissionMode` (Claude) and `ApprovalPolicy` (Codex), and the
+  renamed `SandboxMode` (Codex).
 - **Six Hypothesis-driven fuzzer families** covering per-codec
-  round-trip, cross-target unification differential (9 shared paths
-  × 4 properties), pass-through deep-nesting, the merge engine
-  state machine, and Unicode broadside.
+  round-trip, cross-target unification differential, pass-through
+  deep-nesting, the merge engine state machine, and Unicode broadside.
 
-The test suite is **410 passing + 25 skipped + 70 fuzz tests
+The test suite is **463 passing + 35 skipped + 70 fuzz tests
 (deselected by default)**. **Zero strict-xfails** remain on the
-default suite — every "declared-future-work" contract from 0.2.0 is
-either retired by a Wave-11 fix or absorbed into a fuzz property.
-The fuzz suite runs nightly in CI under `uv run pytest -m fuzz`. See
-`CHANGELOG.md` for the per-wave breakdown and `docs/superpowers/specs/2026-05-05-chameleon-design.md`
+default suite. The fuzz suite runs nightly in CI under
+`uv run pytest -m fuzz`. See `CHANGELOG.md` for the per-wave
+breakdown and `docs/superpowers/specs/2026-05-05-chameleon-design.md`
 for the architecture.
 
 ### What's verified end-to-end
