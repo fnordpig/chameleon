@@ -103,11 +103,17 @@ class CodexAssembler:
                         inner[k] = v
                     mp_table[mp_name] = inner
                 doc["marketplaces"] = mp_table
+            # Wave-10 §15.x — top-level ``web_search`` mode (StrEnum value).
+            if capabilities.web_search is not None:
+                doc["web_search"] = capabilities.web_search.value
 
         environment = per_domain.get(Domains.ENVIRONMENT)
         if isinstance(environment, CodexEnvironmentSection):
             sep = tomlkit.table()
             sep["set"] = environment.shell_environment_policy.set
+            # Wave-10 §15.x — emit ``inherit`` when the codec set it.
+            if environment.shell_environment_policy.inherit is not None:
+                sep["inherit"] = environment.shell_environment_policy.inherit
             doc["shell_environment_policy"] = sep
 
         authorization = per_domain.get(Domains.AUTHORIZATION)
@@ -129,6 +135,21 @@ class CodexAssembler:
                 for k, v in history_dump.items():
                     history_table[k] = v
                 doc["history"] = history_table
+            # Wave-10 §15.x — emit the ``[otel]`` block when the codec
+            # populated an exporter. ``model_dump`` flattens the
+            # discriminated-union arm into a TOML-compatible dict (e.g.
+            # ``{"exporter": "none"}`` for the plain-enum arm or
+            # ``{"exporter": {"otlp-http": {...}}}`` for the structured
+            # arm). The pydantic ``by_alias=True`` keeps the
+            # ``otlp-http`` / ``otlp-grpc`` aliased keys instead of the
+            # snake_case Python attribute names.
+            if lifecycle.otel is not None:
+                otel_dump = lifecycle.otel.model_dump(exclude_none=True, by_alias=True)
+                if otel_dump:
+                    otel_table = tomlkit.table()
+                    for k, v in otel_dump.items():
+                        otel_table[k] = v
+                    doc["otel"] = otel_table
 
         interface = per_domain.get(Domains.INTERFACE)
         if isinstance(interface, CodexInterfaceSection):
@@ -240,16 +261,22 @@ class CodexAssembler:
             "model_context_window",
             "model_auto_compact_token_limit",
             "model_catalog_json",
+            # Wave-10 §15.x — auth.method.
+            "forced_login_method",
         }
         directives_keys = {
             "model_instructions_file",
             "commit_attribution",
             "personality",  # P1-E
+            # Wave-10 §15.x — directives.verbosity.
+            "model_verbosity",
         }
-        capabilities_keys = {"mcp_servers", "plugins", "marketplaces"}
+        # Wave-10 §15.x — capabilities.web_search.
+        capabilities_keys = {"mcp_servers", "plugins", "marketplaces", "web_search"}
         environment_keys = {"shell_environment_policy"}
         authorization_keys = {"sandbox_mode", "sandbox_workspace_write", "approvals_reviewer"}
-        lifecycle_keys = {"history"}
+        # Wave-10 §15.x — lifecycle.telemetry.exporter ↔ otel.exporter.
+        lifecycle_keys = {"history", "otel"}
         interface_keys = {"tui", "file_opener"}
         governance_keys = {"features", "projects"}
 

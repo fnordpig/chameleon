@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
+from chameleon.codecs.codex._generated import WebSearchMode
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.capabilities import (
     Capabilities,
@@ -91,6 +92,10 @@ class CodexCapabilitiesSection(BaseModel):
     mcp_servers: dict[str, _CodexMcpServer] = Field(default_factory=dict)
     plugins: dict[str, _CodexPluginEntry] = Field(default_factory=dict)
     marketplaces: dict[str, _CodexMarketplaceEntry] = Field(default_factory=dict)
+    # Wave-10 §15.x — capabilities.web_search ↔ web_search (top-level
+    # ``WebSearchMode`` enum on ``ConfigToml``). Vocabulary matches the
+    # neutral Literal exactly: ``disabled``/``cached``/``live``.
+    web_search: WebSearchMode | None = None
 
 
 class CodexCapabilitiesCodec:
@@ -102,6 +107,8 @@ class CodexCapabilitiesCodec:
             FieldPath(segments=("mcp_servers",)),
             FieldPath(segments=("plugins",)),
             FieldPath(segments=("marketplaces",)),
+            # Wave-10 §15.x:
+            FieldPath(segments=("web_search",)),
         }
     )
 
@@ -136,6 +143,12 @@ class CodexCapabilitiesCodec:
             section.marketplaces[mp_name] = _codex_marketplace_from_neutral(
                 mp_name, model.plugin_marketplaces[mp_name], ctx
             )
+        # Wave-10 §15.x — capabilities.web_search ↔ web_search. The Literal
+        # vocabulary on the neutral side (``cached``/``live``/``disabled``)
+        # was chosen to match Codex's ``WebSearchMode`` exactly, so this is
+        # a direct lookup-by-value with no LossWarning paths.
+        if model.web_search is not None:
+            section.web_search = WebSearchMode(model.web_search)
         return section
 
     @staticmethod
@@ -175,10 +188,14 @@ class CodexCapabilitiesCodec:
             neutral = _codex_marketplace_to_neutral(mp_name, entry, ctx)
             if neutral is not None:
                 marketplaces[mp_name] = neutral
+        # Wave-10 §15.x — reverse mapping for web_search. Pydantic accepts
+        # the StrEnum instance for the neutral Literal field.
+        web_search_value = section.web_search.value if section.web_search is not None else None
         return Capabilities(
             mcp_servers=servers,
             plugins=plugins,
             plugin_marketplaces=marketplaces,
+            web_search=web_search_value,
         )
 
 

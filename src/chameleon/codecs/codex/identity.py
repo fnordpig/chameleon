@@ -4,11 +4,20 @@ Maps:
   reasoning_effort   -> model_reasoning_effort  (minimal/low/medium/high/xhigh)
   model[codex]       -> model
   thinking           -> n/a in Codex (LossWarning if set)
+  auth.method        -> forced_login_method (Wave-10 §15.x)
 
 P1-F — Codex-only identity tuning knobs (claimed here; no analogue in Claude):
   context_window     -> model_context_window
   compact_threshold  -> model_auto_compact_token_limit
   model_catalog_path -> model_catalog_json
+
+Wave-10 §15.x — auth.method:
+  Neutral ``AuthMethod`` has 5 values; Codex's ``ForcedLoginMethod`` enum
+  in ``_generated.py`` declares only ``chatgpt`` and ``api``. The two
+  cleanly-mapped values are ``OAUTH ↔ chatgpt`` and ``API_KEY ↔ api``.
+  ``BEDROCK`` / ``VERTEX`` / ``AZURE`` have no Codex analogue (Codex talks
+  exclusively to OpenAI / OSS providers), so encoding any of them emits a
+  typed ``LossWarning`` and leaves ``forced_login_method`` unset.
 
 The neutral schema uses cross-target vocabulary; this codec is the single
 place that maps neutral names to Codex's wire names. Round-trip preserves
@@ -23,8 +32,23 @@ from pydantic import BaseModel, ConfigDict
 
 from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
+from chameleon.codecs.codex._generated import ForcedLoginMethod
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
-from chameleon.schema.identity import Identity, ReasoningEffort
+from chameleon.schema.identity import AuthMethod, Identity, IdentityAuth, ReasoningEffort
+
+# Wave-10 §15.x — auth.method bidirectional mapping. Only OAUTH and
+# API_KEY have Codex equivalents; the other neutral values emit a
+# LossWarning at ``to_target`` time. Stored as enum-keyed dicts so a
+# future upstream rename of ``ForcedLoginMethod`` fails typing here
+# rather than silently at runtime.
+_AUTH_METHOD_TO_CODEX: dict[AuthMethod, ForcedLoginMethod] = {
+    AuthMethod.OAUTH: ForcedLoginMethod.chatgpt,
+    AuthMethod.API_KEY: ForcedLoginMethod.api,
+}
+_CODEX_TO_AUTH_METHOD: dict[ForcedLoginMethod, AuthMethod] = {
+    ForcedLoginMethod.chatgpt: AuthMethod.OAUTH,
+    ForcedLoginMethod.api: AuthMethod.API_KEY,
+}
 
 
 class CodexIdentitySection(BaseModel):
@@ -37,6 +61,13 @@ class CodexIdentitySection(BaseModel):
     model_context_window: int | None = None
     model_auto_compact_token_limit: int | None = None
     model_catalog_json: str | None = None
+    # Wave-10 §15.x — auth.method ↔ forced_login_method. Stored as the raw
+    # wire string (not the upstream ``ForcedLoginMethod`` enum) so an
+    # unrecognized value disassembled from live config can land in the
+    # section, hit ``from_target``, and emit a typed ``LossWarning``
+    # rather than crash inside Pydantic. Mirrors the ``approvals_reviewer``
+    # pattern in ``CodexAuthorizationSection``.
+    forced_login_method: str | None = None
 
 
 class CodexIdentityCodec:
@@ -51,6 +82,8 @@ class CodexIdentityCodec:
             FieldPath(segments=("model_context_window",)),
             FieldPath(segments=("model_auto_compact_token_limit",)),
             FieldPath(segments=("model_catalog_json",)),
+            # Wave-10 §15.x — auth.method:
+            FieldPath(segments=("forced_login_method",)),
         }
     )
 
@@ -89,6 +122,24 @@ class CodexIdentityCodec:
             section.model_auto_compact_token_limit = model.compact_threshold
         if model.model_catalog_path is not None:
             section.model_catalog_json = model.model_catalog_path
+        # Wave-10 §15.x — auth.method ↔ forced_login_method.
+        if model.auth.method is not None:
+            mapped = _AUTH_METHOD_TO_CODEX.get(model.auth.method)
+            if mapped is None:
+                ctx.warn(
+                    LossWarning(
+                        domain=Domains.IDENTITY,
+                        target=BUILTIN_CODEX,
+                        message=(
+                            f"identity.auth.method={model.auth.method.value!r} has no "
+                            "Codex equivalent — Codex's forced_login_method only "
+                            "accepts 'chatgpt' (OAuth) or 'api' (API key); leaving unset"
+                        ),
+                        field_path=FieldPath(segments=("auth", "method")),
+                    )
+                )
+            else:
+                section.forced_login_method = mapped.value
         return section
 
     @staticmethod
@@ -117,6 +168,24 @@ class CodexIdentityCodec:
             ident.compact_threshold = section.model_auto_compact_token_limit
         if section.model_catalog_json is not None:
             ident.model_catalog_path = section.model_catalog_json
+        # Wave-10 §15.x — reverse mapping for forced_login_method.
+        if section.forced_login_method is not None:
+            try:
+                upstream = ForcedLoginMethod(section.forced_login_method)
+            except ValueError:
+                ctx.warn(
+                    LossWarning(
+                        domain=Domains.IDENTITY,
+                        target=BUILTIN_CODEX,
+                        message=(
+                            f"forced_login_method {section.forced_login_method!r} is "
+                            "not in the documented vocabulary ('chatgpt'/'api'); dropping"
+                        ),
+                        field_path=FieldPath(segments=("forced_login_method",)),
+                    )
+                )
+            else:
+                ident.auth = IdentityAuth(method=_CODEX_TO_AUTH_METHOD[upstream])
         return ident
 
 
