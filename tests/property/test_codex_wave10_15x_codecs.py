@@ -9,8 +9,10 @@ exercises the specific LossWarning paths that exhaustion can't reach
 Wire mappings (with ``_generated.py`` evidence):
 
 * ``identity.auth.method``     ↔ ``forced_login_method`` (``ForcedLoginMethod`` enum)
-  Only ``OAUTH ↔ chatgpt`` and ``API_KEY ↔ api`` are bidirectional;
-  ``BEDROCK`` / ``VERTEX`` / ``AZURE`` emit a typed LossWarning.
+  Wave-11 §15.x reconciliation: after AuthMethod was shrunk to {OAUTH,
+  API_KEY}, both values are bidirectional (``OAUTH ↔ chatgpt``,
+  ``API_KEY ↔ api``); no LossWarning path remains on encode. Decode
+  still warns on unknown wire values for forward-compat.
 * ``directives.verbosity``     ↔ ``model_verbosity`` (``Verbosity`` enum, exact match)
 * ``capabilities.web_search``  ↔ ``web_search``       (``WebSearchMode`` enum, exact match)
 * ``environment.inherit``      ↔ ``shell_environment_policy.inherit`` (3-arm RootModel union)
@@ -64,19 +66,28 @@ def test_codex_identity_auth_method_round_trip(neutral: AuthMethod, wire: str) -
     assert ctx.warnings == []
 
 
-@pytest.mark.parametrize("neutral", [AuthMethod.BEDROCK, AuthMethod.VERTEX, AuthMethod.AZURE])
-def test_codex_identity_auth_method_loss_warns_on_unsupported(
-    neutral: AuthMethod,
-) -> None:
-    """BEDROCK / VERTEX / AZURE have no Codex equivalent — encoding emits
-    a typed LossWarning and leaves the wire field unset."""
-    orig = Identity(auth=IdentityAuth(method=neutral))
-    ctx = TranspileCtx()
-    section = CodexIdentityCodec.to_target(orig, ctx)
-    assert section.forced_login_method is None
-    assert any(
-        "forced_login_method" in w.message and neutral.value in w.message for w in ctx.warnings
-    )
+def test_codex_identity_auth_method_full_round_trip_after_reconciliation() -> None:
+    """Wave-11 §15.x reconciliation: after AuthMethod was shrunk to
+    {OAUTH, API_KEY}, every neutral value has a Codex wire equivalent
+    and round-trips lossless. The previous ``loss_warns_on_unsupported``
+    test (BEDROCK / VERTEX / AZURE) is gone with the values it asserted on.
+
+    This test exists to pin the round-trip-on-every-value guarantee so a
+    future schema change that re-introduces a Codex-unmappable value
+    fails here, not in production.
+    """
+    for method in AuthMethod:
+        ctx = TranspileCtx()
+        section = CodexIdentityCodec.to_target(Identity(auth=IdentityAuth(method=method)), ctx)
+        assert section.forced_login_method is not None, (
+            f"AuthMethod.{method.name} did not produce a wire value; "
+            "Wave-11 reconciliation expects every neutral value to map. "
+            "If you added a value, mirror it in CodexIdentityCodec or "
+            "remove it from AuthMethod."
+        )
+        restored = CodexIdentityCodec.from_target(section, ctx)
+        assert restored.auth.method is method
+        assert ctx.warnings == []
 
 
 def test_codex_identity_unknown_forced_login_method_drops_with_warning() -> None:

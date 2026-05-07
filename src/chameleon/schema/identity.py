@@ -29,13 +29,39 @@ class ReasoningEffort(Enum):
 
 
 class AuthMethod(Enum):
-    """How Chameleon expects the operator to authenticate to the target."""
+    """How Chameleon expects the operator to authenticate to the target.
+
+    Wave-11 §15.x reconciliation: this enum was originally six values
+    (OAUTH/API_KEY/BEDROCK/VERTEX/AZURE/NONE) on the assumption that
+    Chameleon would model multi-cloud provider lanes as an auth-method
+    axis. Inspection of both upstream wire schemas at Wave-10 disproved
+    that:
+
+    * Claude's ``ForceLoginMethod`` (``_generated.py``) is a 2-element
+      ``StrEnum``: ``claudeai`` (OAuth into Claude.ai/Pro/Max) and
+      ``console`` (API-key billing).
+    * Codex's ``ForcedLoginMethod`` (``_generated.py``) is a 2-element
+      ``StrEnum``: ``chatgpt`` (OAuth into ChatGPT) and ``api`` (API
+      key into the OpenAI Platform).
+
+    Neither target exposes ``bedrock`` / ``vertex`` / ``azure`` as a
+    login-method value. Claude reaches the AWS Bedrock / GCP Vertex
+    provider lanes via per-provider env vars
+    (``ANTHROPIC_BEDROCK_BASE_URL``, ``CLAUDE_CODE_SKIP_BEDROCK_AUTH``,
+    ``ANTHROPIC_VERTEX_BASE_URL``, ``ANTHROPIC_VERTEX_PROJECT_ID``,
+    ...) which are owned by the ``environment`` codec, not by an
+    auth-method enum. Codex talks exclusively to OpenAI / OSS
+    providers and has no cloud-provider lane at all.
+
+    Carrying ``BEDROCK`` / ``VERTEX`` / ``AZURE`` here meant every
+    operator who set them got two LossWarnings (one per target) and
+    no observable behaviour change — pure cargo-cult. They are
+    removed in Wave-11 §15.x reconciliation; provider-lane selection
+    lives where it actually has wire reality (env vars).
+    """
 
     OAUTH = "oauth"
     API_KEY = "api-key"
-    BEDROCK = "bedrock"
-    VERTEX = "vertex"
-    AZURE = "azure"
 
 
 class IdentityEndpoint(BaseModel):

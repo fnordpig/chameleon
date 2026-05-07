@@ -3,9 +3,12 @@
 Sibling agent owns the matching Codex side. This file verifies the
 Claude side only:
 
-  1. identity.auth.method (AuthMethod) — partial map onto Claude's
-     forceLoginMethod (claudeai/console). Two values round-trip; three
-     emit LossWarning.
+  1. identity.auth.method (AuthMethod) — full bidirectional map onto
+     Claude's forceLoginMethod (claudeai/console). Wave-11 §15.x
+     reconciliation shrank AuthMethod from 6 values to 2 after
+     confirming neither upstream exposes BEDROCK/VERTEX/AZURE/NONE
+     as a login-method enum value, so all remaining values now
+     round-trip lossily-free on Claude.
   2. directives.verbosity (Verbosity) — LossWarning only; Claude has no
      persistent verbosity setting.
   3. capabilities.web_search (Literal) — LossWarning only; Claude gates
@@ -54,18 +57,24 @@ def test_identity_auth_method_round_trips_supported_values(neutral: AuthMethod, 
     assert restored.auth.method is neutral
 
 
-@pytest.mark.parametrize("neutral", [AuthMethod.BEDROCK, AuthMethod.VERTEX, AuthMethod.AZURE])
-def test_identity_auth_method_warns_on_unsupported_values(neutral: AuthMethod) -> None:
-    orig = Identity(auth=IdentityAuth(method=neutral))
-    ctx = TranspileCtx()
-    section = ClaudeIdentityCodec.to_target(orig, ctx)
-    assert section.force_login_method is None
-    assert any(
-        w.domain is Domains.IDENTITY
-        and w.target == BUILTIN_CLAUDE
-        and w.field_path == FieldPath(segments=("forceLoginMethod",))
-        for w in ctx.warnings
-    )
+def test_identity_auth_method_enum_reconciled_to_two_values() -> None:
+    """Wave-11 §15.x reconciliation pin: ``AuthMethod`` carries exactly the
+    two values that both upstream login-method enums model.
+
+    The original neutral schema had six values (OAUTH/API_KEY/BEDROCK/
+    VERTEX/AZURE/NONE) on the speculative theory that Chameleon could
+    expose multi-cloud provider lanes through a single auth-method axis.
+    Inspection of both ``_generated.py`` files showed only OAUTH and
+    API_KEY have any wire reality; the rest produced a LossWarning on
+    every target without changing observable behaviour.
+
+    This test fails loudly if a future change re-adds a value Chameleon
+    cannot honestly round-trip on either target. If a future upstream
+    grows a third login method, add it here AND mirror the codec mapping
+    on whichever target newly supports it; do NOT add neutral values
+    that no codec can claim.
+    """
+    assert {m.value for m in AuthMethod} == {"oauth", "api-key"}
 
 
 def test_identity_api_key_helper_round_trips() -> None:
