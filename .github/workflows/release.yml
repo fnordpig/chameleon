@@ -1,9 +1,12 @@
 name: release
 
-# Manual-trigger only. Runs the four verification gates, then builds
-# the wheel + sdist via `uv build` and uploads them as a workflow
-# artifact named `dist`. Publishing to PyPI is a separate, deliberate
-# operator action — this workflow does NOT publish.
+# Two trigger surfaces:
+#   * workflow_dispatch — manual smoke build of any ref. Runs the four
+#     gates and uploads dist artifacts. Does NOT publish.
+#   * push of a v*.*.* tag — runs the same gates + build, then publishes
+#     to PyPI via OIDC trusted publishing (no long-lived API token in
+#     repo secrets). Requires the operator to have configured a Trusted
+#     Publisher for this repo at https://pypi.org/manage/account/publishing/.
 on:
   workflow_dispatch:
     inputs:
@@ -11,6 +14,10 @@ on:
         description: "Git ref to build (defaults to the workflow's checkout)"
         required: false
         default: ""
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -76,3 +83,33 @@ jobs:
           path: dist/
           if-no-files-found: error
           retention-days: 30
+
+  publish:
+    name: publish to PyPI
+    # Only run on tag push, never on manual workflow_dispatch — manual
+    # builds are smoke tests, not releases. The build job's gates have
+    # already run; this job only fires if everything passed.
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # OIDC-based Trusted Publishing: PyPI exchanges the workflow's OIDC
+    # token for a short-lived API token. No PYPI_API_TOKEN secret needed
+    # in the repo. Configure once at PyPI under "Publishing" → add a
+    # Trusted Publisher with workflow=release.yml, repo=fnordpig/chameleon.
+    permissions:
+      id-token: write
+    environment:
+      name: pypi
+      url: https://pypi.org/p/chameleon
+    steps:
+      - name: Download dist artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4.3.0
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        # pypa/gh-action-pypi-publish handles the OIDC dance + upload.
+        # Pinned to the v1.14.0 commit; bump via dependabot when a new
+        # release lands.
+        uses: pypa/gh-action-pypi-publish@6733eb7d741f0b11ec6a39b58540dab7590f9b7d  # v1.14.0

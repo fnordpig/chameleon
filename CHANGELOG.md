@@ -9,6 +9,107 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.5.0] — 2026-05-07
+
+A merge-UX release. The merge engine now remembers what the operator
+decided, exposes new resolution strategies, ships a real verbose mode,
+and the CLI's `init`, `status`, and `--verbose` flags all do what their
+names imply for the first time. Plus shipping infrastructure: PyPI
+publish via OIDC trusted publishing on tag, and a weekly upstream
+schema drift workflow that opens regenerate-PRs when Claude or Codex
+upstreams move.
+
+### Added — merge ergonomics
+
+- **Resolution memory.** Every interactive decision persists to
+  `neutral.yaml` under a typed `resolutions:` block, keyed by
+  `FieldPath`. Each entry includes a `decision_hash` over the
+  conflicting `(N₀, N₁, per_target)` tuple. Next merge: same hash →
+  silent auto-apply (no re-prompt); different hash → re-prompt with the
+  prior decision shown as informational context plus a "values have
+  changed since" caveat. Stale resolutions are GC'd at end-of-merge.
+- **`[t]` target-specific resolution.** New choice in the interactive
+  resolver. Disables cross-target propagation for a path by removing it
+  from unified neutral and writing per-target values to
+  `targets.<tid>.target_specific[<path>]`. Engine patches each codec's
+  per-target neutral with the target-specific value before `to_target`.
+- **`OnConflict.LATEST` strategy.** Non-interactive resolution that
+  picks the source with the most recent mtime. Useful for cron-driven
+  login-time merges where the most recent edit (regardless of side)
+  should win without prompting.
+- **`chameleon resolutions list|clear` CLI.** Operator escape hatches —
+  enumerate stored decisions with hash status (current / stale /
+  missing-record), or remove one or all.
+
+### Added — release infrastructure
+
+- **PyPI publish via OIDC.** `release.yml` now runs on `v*.*.*` tag
+  push: gates → build → publish via PyPI Trusted Publishing. No
+  long-lived `PYPI_API_TOKEN` secret needed; configure once at
+  pypi.org under Publishing → Trusted Publishers.
+- **Weekly upstream schema drift workflow.** `.github/workflows/schema-sync.yml`
+  runs Mondays 07:00 UTC. Resolves the current Claude (schemastore)
+  and Codex (codex-rs) tip SHAs, regenerates `_generated.py`, runs the
+  four gates including the static no-silent-drops audit, and opens a
+  PR if anything diverged. Failing gates surface as a labelled PR for
+  operator review rather than failing silently between manual syncs.
+
+### Fixed
+
+- **`chameleon init --dry-run` is now actually side-effect-free.**
+  Pre-fix it wrote `~/.config/chameleon/neutral.yaml` regardless of the
+  flag (only the merge step respected dry-run). Post-fix the entire
+  init handler short-circuits with a description of what it would do.
+- **`chameleon status` is now actually informative.** Pre-fix it ran a
+  dry-run merge and printed the merge summary — usually just
+  `"merge: nothing to do"` when clean, conveying nothing useful.
+  Post-fix it reports neutral file presence, per-target drift
+  (clean / drift), pending notice counts, and unresolved transactions.
+  Exit 0 if everything's clean and nothing pending; exit 1 otherwise.
+- **`--verbose` is no longer a dead flag.** Pre-fix it was parsed by
+  every subcommand but consumed by zero code paths — operators set it
+  expecting more output and got nothing. Post-fix it emits a
+  pre-merge preamble (state_root, neutral path, registered targets),
+  per-target LossWarning tally with merge_id, and surfaces stale
+  notices and transactions.
+
+### Changed
+
+- **`--no-warn` flag added to every subcommand.** Suppresses the
+  LossWarning errata that print to stderr after a merge. Useful for
+  non-interactive runs that surface warnings via doctor instead.
+- **README rewrite.** Opens with a concrete `chameleon status` example
+  showing real output, replaces the per-wave status section with
+  capability-stated form ("the tool now does X" instead of
+  "Wave-N delivered X").
+- **Login-recipe docs refreshed.** `docs/login/{launchd,systemd,zlogin}.md`
+  use `--on-conflict=fail` consistently and document `--no-warn`.
+- **Comment scrub.** Removed temporal session-droppings from comments
+  and docstrings across `src/` and `tests/` (~370 line-hits across 84
+  files). Replaced wave/section parentheticals with the substantive
+  technical content they were tagging. Bug-class shorthand in code
+  comments retained where the surrounding text expands the label.
+
+### Tests
+
+- 130 (0.1.0) → 286 (0.2.0) → 415 (0.3.0) → 463 (0.4.0) → **510 passing
+  + 35 skipped + 70 fuzz (deselected)** at 0.5.0.
+- Three regression tests rewritten to filter `LossWarning` messages on
+  substantive content (`"approvals_reviewer"`, `"personality"`,
+  `"hook"`) instead of session tags. Same behavioral contract; the
+  filter is now durable across cleanups.
+
+### Known limitations
+
+- **Schema migrations not yet implemented.** `schema_version: 1` only.
+  The first version bump will need a migration path; design exists,
+  implementation does not.
+- **No `chameleon-test-kit` published helper for plugin authors.**
+  The plugin authoring guide assumes it exists; no actual package
+  shipped. Real blocker for anyone writing a third target codec.
+- **Windows still untested.** `fcntl.flock` is POSIX-only by design.
+  Unchanged from 0.1.0.
+
 ## [0.4.0] — 2026-05-06
 
 This release closes the **last open architectural node** from the

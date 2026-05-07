@@ -1,0 +1,147 @@
+name: schema-sync
+
+# Weekly check for upstream Claude / Codex schema drift.
+#
+# Runs `tools/sync-schemas/sync.py` against the *current* tip of each
+# upstream (Claude: schemastore.org HEAD; Codex: openai/codex HEAD)
+# and opens a PR if the regenerated artefacts differ from main. The
+# pinned SHAs in `tools/sync-schemas/pins.toml` are bumped to the new
+# upstream tips as part of the PR.
+#
+# This is the inverse of the normal pin discipline: instead of an
+# operator deciding "I want to refresh schemas", the workflow notices
+# upstream moved and asks the operator to review the resulting diff.
+#
+# The static `tests/static/test_no_silent_upstream_drops.py` asserts
+# that every wire field is either claimed by a codec or routed to
+# pass-through, so codec drift surfaces in the PR as a failing CI.
+on:
+  schedule:
+    # 07:00 UTC every Monday. Spread across timezones; if it breaks
+    # the operator sees it Tuesday morning when the US wakes up.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: refresh upstream pins + regenerate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: "3.13"
+
+      - name: Sync dependencies (frozen)
+        run: uv sync --frozen --group schema-sync
+
+      - name: Resolve current upstream tips
+        id: tips
+        # Replace the pinned SHAs in pins.toml with the latest commit
+        # on each upstream's default branch, in-place. The sync.py
+        # script will then fetch + regenerate against those tips.
+        run: |
+          set -euo pipefail
+          claude_sha=$(curl -fsSL https://api.github.com/repos/SchemaStore/schemastore/commits/master \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          codex_sha=$(curl -fsSL https://api.github.com/repos/openai/codex/commits/main \
+            | python -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
+          echo "claude_sha=$claude_sha" >> "$GITHUB_OUTPUT"
+          echo "codex_sha=$codex_sha" >> "$GITHUB_OUTPUT"
+          # In-place rewrite of pins.toml.
+          python <<PY
+          import re
+          from pathlib import Path
+          p = Path("tools/sync-schemas/pins.toml")
+          text = p.read_text(encoding="utf-8")
+          # Two distinct git_sha lines; rewrite by section.
+          text = re.sub(
+              r'(\[claude\][^\[]*?git_sha\s*=\s*")[a-f0-9]+(")',
+              lambda m: m.group(1) + "$claude_sha" + m.group(2),
+              text,
+              flags=re.DOTALL,
+          )
+          text = re.sub(
+              r'(\[codex\][^\[]*?git_sha\s*=\s*")[a-f0-9]+(")',
+              lambda m: m.group(1) + "$codex_sha" + m.group(2),
+              text,
+              flags=re.DOTALL,
+          )
+          p.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Install Rust (for Codex schema-dump binary)
+        # Codex regeneration runs cargo against codex-rs via a git
+        # dependency. Without rustup the sync.py codex branch fails.
+        # dtolnay/rust-toolchain has no tags — it uses long-lived
+        # branches (`stable`, `nightly`, etc.). Pin the current
+        # `stable` branch HEAD to avoid silent upstream shifts.
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # branch=stable
+        with:
+          toolchain: stable
+
+      - name: Run schema sync
+        # If either upstream is unreachable or the build fails, the
+        # job fails — that surfaces an operator-actionable signal in
+        # the schedule.
+        run: |
+          uv run --group schema-sync python tools/sync-schemas/sync.py claude
+          uv run --group schema-sync python tools/sync-schemas/sync.py codex
+
+      - name: Run gates against regenerated artefacts
+        # The static no-silent-drops test runs here too — if upstream
+        # added a field that no codec claims, we want the PR to
+        # surface that loudly so the reviewer sees it.
+        # Tests are allowed to fail; we still open the PR but mark it
+        # with a label so the reviewer knows codec work is needed.
+        id: gates
+        continue-on-error: true
+        run: |
+          uv run ruff format tools/sync-schemas/upstream src/chameleon/codecs/*/_generated.py 2>/dev/null || true
+          uv run ruff check
+          uv run ruff format --check
+          uv run ty check
+          uv run pytest
+
+      - name: Open PR if there is drift
+        # peter-evans/create-pull-request short-circuits silently when
+        # the working tree is clean, so unchanged upstream = no PR
+        # noise. When upstream moved, we get a single PR that
+        # accumulates further drift on subsequent runs (same branch).
+        uses: peter-evans/create-pull-request@84ae59a2cdc2258d6fa0732dd66352dddae2a412  # v7.0.9
+        with:
+          branch: schema-sync/upstream-drift
+          delete-branch: true
+          title: "schema-sync: upstream drift detected"
+          body: |
+            Automated upstream schema drift PR.
+
+            **Claude pin**: bumped to `${{ steps.tips.outputs.claude_sha }}`
+            **Codex pin**: bumped to `${{ steps.tips.outputs.codex_sha }}`
+
+            **Gate result**: `${{ steps.gates.outcome }}`
+
+            If gates failed, `tests/static/test_no_silent_upstream_drops.py`
+            most likely caught a wire field with no claimer — review the
+            diff in `src/chameleon/codecs/*/_generated.py` and either claim
+            the new field in a codec or route it to pass-through. If gates
+            passed, the regeneration is mechanically clean and the diff
+            is the operator's call.
+
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          commit-message: "schema-sync: bump upstream pins and regenerate"
+          labels: schema-sync
+          author: "github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>"
