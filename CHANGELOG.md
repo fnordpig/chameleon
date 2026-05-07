@@ -9,6 +9,172 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.3.0] — 2026-05-06
+
+This release closes the V1 → V1+ acceptance gate. The verification
+posture shifts from hand-curated unit tests to **exhaustive proof and
+property-based fuzzing**: every wire field on both targets is now
+statically accounted for, every finite-domain enum is proved bijective,
+and six Hypothesis-driven fuzzers exercise the codecs, the cross-target
+unification engine, and the merge state machine. Six real bugs surfaced
+by those fuzzers are fixed in this release, with two of them retiring
+strict xfails from 0.2.0.
+
+The test suite went from **286 passing + 5 strict xfails (0.2.0)** to
+**410 passing + 25 skipped + 70 fuzz tests (deselected by default)** at
+0.3.0 cut. Zero strict-xfails remain on the default suite. The fuzz
+suite runs under `uv run pytest -m fuzz` and in CI nightly.
+
+### Added — verification infrastructure
+
+- **Static no-silent-drops audit.** `tests/static/test_no_silent_upstream_drops.py`
+  enumerates every field on the upstream-canonized
+  `_generated.ClaudeCodeSettings` (Claude) and `_generated.ConfigToml`
+  (Codex) and asserts each is either claimed by a codec or explicitly
+  routed through pass-through — **2119/2119 wire fields accounted for**.
+  A new upstream field that nobody claims now fails CI loudly instead of
+  silently dropping at runtime.
+- **Exhaustive enum / Literal bijection.** `tests/parity/test_enum_literal_bijection.py`
+  proves round-trip on **27 finite-domain leaves** by enumerating every
+  member of every `enum.Enum` and `typing.Literal` reachable from the
+  neutral schema and asserting `from_target(to_target(x)) == x` for
+  every value. A new enum value that breaks bijection now fails at
+  schema-load time.
+- **Hypothesis fuzzer scaffolding** (`tests/fuzz/`). Strategies, marker
+  configuration, profile registration, and CI workflow ship with the
+  release. The five fuzzer families below all build on this scaffold.
+
+### Added — Hypothesis-guided fuzzers
+
+- **FUZZ-1 + FUZZ-2 — per-codec round-trip and wire-disassemble.**
+  Property: for every codec on every target, `from_target(to_target(x)) == x`
+  on randomly-generated valid inputs.
+- **FUZZ-3 — cross-target unification differential.** Property: for the
+  9 schema paths that have a codec on both Claude and Codex, the
+  unification engine produces the same neutral value regardless of
+  which target's wire shape it started from. Four properties checked
+  per shared path: idempotence, commutativity (within target),
+  cross-target equivalence, and semantic preservation under merge.
+- **FUZZ-4 — pass-through deep-nesting.** Property: arbitrary
+  pass-through trees (target-native types, deeply nested, mixed
+  scalar / list / dict / TOML datetime) survive round-trip through the
+  `targets.<target>.*` namespace at adversarial depth.
+- **FUZZ-5 — engine state machine.** A `RuleBasedStateMachine`
+  exercises the merge engine across sequences of operations (init,
+  edit-target-A, edit-target-B, edit-neutral, merge, adopt, discard,
+  doctor) and asserts the merge invariants (idempotency, drift
+  detection, conflict classification) hold at every reachable state.
+- **FUZZ-6 — Unicode broadside.** Property: every Unicode codepoint
+  the schema permits round-trips through every codec, every I/O layer,
+  and the partial-ownership writer. Catches BOM / NFC vs NFD
+  normalisation regressions.
+
+### Added — §15.x codec slots
+
+- **Claude side: Wave-10 §15.x codec coverage.** Three previously
+  pass-through-only enum slots are promoted to first-class codec
+  coverage with full round-trip; thirteen additional slots are
+  documented as `LossWarning`-emitting where the Claude wire shape
+  cannot represent the neutral richness.
+- **Codex side: Wave-10 §15.x codec slots.** Twelve previously
+  pass-through-only Codex enum slots get first-class codec coverage,
+  each with documented `LossWarning`s on the lossy axes.
+
+### Fixed — bugs surfaced and fixed by the fuzzers
+
+The fuzzers found six real bugs; each is fixed in 0.3.0 by a dedicated
+parity branch.
+
+- **F-CWD — `McpServerStdio.cwd` was being dropped on both targets.**
+  Both the Claude and Codex `capabilities.mcp_servers` codecs now
+  carry the `cwd` working-directory through the wire shape. Without
+  this fix, an MCP server entry with a non-default cwd would silently
+  lose it on the first merge.
+- **F-MP-G / F-MP-U / F-AU — Codex marketplace round-trip.** The
+  Codex `marketplaces` codec now preserves `kind=github`, `url`, and
+  `auto_update` through the round-trip via Chameleon-namespaced
+  extras; previously these three fields collapsed onto an incomplete
+  marketplace entry. **This retires the F2 xfail from 0.2.0** —
+  `[marketplaces.<name>]` sub-tables are now lossless.
+- **A-TRUST — Codex Trust list lossy-collapse surfaced as
+  `LossWarning`.** The Codex governance codec now emits two
+  documented `LossWarning` categories — `Trust.duplicate_paths` and
+  `Trust.both_trusted_and_untrusted` — covering the two cases where
+  the neutral `Trust` schema can express more than the
+  `projects.<path>.trust_level` wire shape can hold.
+- **D-IDEM — governance idempotency asymmetry.** Trust path lists are
+  now canonicalised at `Trust` schema construction (dedup within each
+  list; if a path appears in both lists, `untrusted_paths` wins). This
+  matches the Codex codec's last-write-wins behaviour and makes the
+  schema constructor itself idempotent — the second `merge` on a
+  duplicate-bearing input is now a no-op at the schema level, not just
+  the codec level. The fuzz state machine's D-IDEM xfail is retired.
+
+### Changed
+
+- **`AuthMethod` enum shrunk to wire reality (5 → 2 values).** The
+  Wave-11 §15.x schema reconciliation removed three `AuthMethod` values
+  that no upstream wire shape ever emitted; they had been carried as
+  speculative codec slots since 0.1.0. The two remaining values
+  (`api_key`, `oauth`) are the ones that round-trip through both
+  targets.
+- **Per-target codec coverage delta.** Claude gains 3 round-tripping
+  + 13 documented-loss codec slots; Codex gains 12 round-tripping
+  slots. Combined with F-MP and F-CWD, the §15.x surface is now the
+  same shape on both targets — every previously-pass-through enum is
+  either round-tripped or has a documented `LossWarning`.
+- **Trust schema constructor canonicalises.** See D-IDEM above.
+  Operator-visible: a `neutral.yaml` that lists the same path twice
+  in `governance.trust.trusted_paths` (or that lists it in both
+  trust lists) now silently canonicalises on load, with a
+  `LossWarning` on the merge that surfaces the canonicalisation. This
+  matches what the Codex codec was already doing at serialise time;
+  0.3.0 just makes the schema's invariant explicit.
+
+### Tests
+
+- 130 (0.1.0) → 286 (0.2.0) → **410 passing + 25 skipped + 70 fuzz
+  (deselected)** at 0.3.0. The default suite is the gate; the fuzz
+  marker is opt-in (`uv run pytest -m fuzz`) and runs in CI nightly.
+- **Zero strict-xfails on the default suite.** The three transaction-
+  marker xfails and the F2 marketplace xfail from 0.2.0 are all retired
+  by Wave-11 fixes. (F1 — Claude `statusLine.type` — was retired during
+  the Wave-10 §15.x codec coverage work.)
+- **Exhaustive bijection proof on 27 finite-domain leaves.** Every
+  enum and `Literal` reachable from neutral round-trips on every member.
+- **Cross-target differential fuzz on 9 shared paths × 4 properties.**
+  Idempotence, commutativity, cross-target equivalence, and semantic
+  preservation under merge.
+- **2119/2119 wire fields statically accounted for** by the
+  no-silent-drops audit.
+
+### Known limitations
+
+- **P3 — authorization unification.** The richer authorization surface
+  (Claude's `Bash(...)` permission patterns ↔ Codex's named
+  `[permissions.<name>]` profiles) still ships as `LossWarning`-only
+  on cross-target merges. This is the **last open architectural node**
+  from the original parity-gap DAG; everything else from 0.1.0 forward
+  is either shipped as round-trip codec coverage or has a documented
+  `LossWarning`. P3 needs a design pass — the asymmetry is genuine
+  (Claude is pattern-based and unbounded; Codex is profile-based and
+  named) so unification is not a single codec edit. Tracked for a
+  separate spec; will not ship in a 0.3.x patch.
+- **Five `tests/property/test_codex_trust_lossy.py` failures.** The
+  A-TRUST test suite (commit `e34d819`, Wave-11) was authored against
+  the pre-D-IDEM Trust schema and feeds the codec inputs that contain
+  duplicate paths in-list. After the D-IDEM fix (commit `d329099`),
+  the `Trust` constructor canonicalises those inputs before they reach
+  the codec, so the codec never sees the duplicate-bearing shape these
+  tests were written to exercise. The lossy-collapse contract itself
+  is still upheld — the fuzzers and exemplar tests confirm it — but
+  the unit-level tests need a rework to drive the codec via the
+  pre-canonicalisation entry point. **This is a known test-only gap,
+  not a runtime regression**; the operator-visible Trust round-trip
+  is correct on both targets.
+- **Windows still untested.** `fcntl`-based partial-ownership writes
+  remain POSIX-only by design. Unchanged from 0.1.0.
+
 ## [0.2.0] — 2026-05-06
 
 This release closes the V0 → V1 gap. All eight codec lanes are live

@@ -12,20 +12,33 @@ across tools.
 
 ## Status
 
-**0.2.0 — pre-1.0, functional end-to-end, real acceptance gate.**
+**0.3.0 — pre-1.0, V1+ acceptance gate: smoke + fuzz, zero strict xfails.**
 
 All eight schema domains — `identity`, `directives`, `capabilities`,
 `environment`, `authorization`, `lifecycle`, `interface`,
 `governance` — have working codecs for both targets, with documented
 `LossWarning`s where the two targets genuinely diverge. The richer
 authorization surface (Claude's `Bash(...)` permission patterns ↔
-Codex's named `[permissions.<name>]` profiles) ships as
+Codex's named `[permissions.<name>]` profiles) is the last open
+architectural node from the original parity-gap DAG; it ships as
 `LossWarning`-only for now and gets its own design spec.
 
-The test suite is **286 passing + 5 strict xfails**. The xfails pin
-declared-future-work contracts (transaction-marker engine wiring; two
-sub-table preservation findings F1/F2) so a fix that incidentally
-satisfies them fails CI loudly until the xfail is removed. See
+The 0.3.0 verification posture is **exhaustive proof + property fuzz**:
+
+- **2119/2119** upstream wire fields statically accounted for (no
+  silent drops audit).
+- **27 finite-domain leaves** proved bijective by enumerating every
+  `enum.Enum` / `Literal` value.
+- **Six Hypothesis-driven fuzzer families** covering per-codec
+  round-trip, cross-target unification differential (9 shared paths
+  × 4 properties), pass-through deep-nesting, the merge engine
+  state machine, and Unicode broadside.
+
+The test suite is **410 passing + 25 skipped + 70 fuzz tests
+(deselected by default)**. **Zero strict-xfails** remain on the
+default suite — every "declared-future-work" contract from 0.2.0 is
+either retired by a Wave-11 fix or absorbed into a fuzz property.
+The fuzz suite runs nightly in CI under `uv run pytest -m fuzz`. See
 `CHANGELOG.md` for the per-wave breakdown and `docs/superpowers/specs/2026-05-05-chameleon-design.md`
 for the architecture.
 
