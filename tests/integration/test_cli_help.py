@@ -37,3 +37,63 @@ def test_cli_merge_dry_run_invokable(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     rc = cli.main(["merge", "--dry-run", "--on-conflict=keep"])
     assert rc == 0
+
+
+def test_cli_init_dry_run_is_side_effect_free(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`init --dry-run` must NOT create the neutral file or any state-repo.
+
+    Regression test for the bug where init wrote ~/.config/chameleon/neutral.yaml
+    unconditionally before checking dry_run. The merge engine respected dry_run
+    but the neutral-bootstrap path did not.
+    """
+    state = tmp_path / "state"
+    config = tmp_path / "config"
+    home = tmp_path / "home"
+    monkeypatch.setenv("XDG_STATE_HOME", str(state))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(config))
+    monkeypatch.setenv("HOME", str(home))
+
+    rc = cli.main(["init", "--dry-run"])
+    assert rc == 0
+
+    # The whole point: nothing on disk.
+    assert not (config / "chameleon" / "neutral.yaml").exists(), "dry-run wrote neutral.yaml"
+    assert not (state / "chameleon").exists(), "dry-run created state directory"
+
+
+def test_cli_verbose_emits_observable_extra_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--verbose` must produce observable extra stderr beyond the default.
+
+    Without --verbose the merge command emits only the summary and any
+    LossWarnings. With --verbose it also emits a preamble (state_root,
+    neutral path, registered targets) and a per-target warning-count
+    tally after the summary. This test pins both the absence (no
+    'verbose:' lines without the flag) and the presence (lines tagged
+    'verbose:' on stderr with the flag).
+    """
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    cli.main(["init"])
+
+    # Without --verbose: zero "verbose:" prefixed lines.
+    capsys.readouterr()  # drain init's output
+    assert cli.main(["merge", "--on-conflict=keep"]) == 0
+    quiet_err = capsys.readouterr().err
+    assert "verbose:" not in quiet_err, f"non-verbose merge leaked verbose: lines:\n{quiet_err}"
+
+    # With --verbose: at least the preamble's three lines (state_root,
+    # neutral, targets) and the per-target tally on stderr.
+    assert cli.main(["merge", "--verbose", "--on-conflict=keep"]) == 0
+    verbose_err = capsys.readouterr().err
+    assert "verbose: state_root=" in verbose_err
+    assert "verbose: neutral=" in verbose_err
+    assert "verbose: targets=" in verbose_err
+    assert "LossWarning(s)" in verbose_err

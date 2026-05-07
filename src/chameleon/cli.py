@@ -21,7 +21,7 @@ from chameleon import __version__
 from chameleon._types import FileOwnership, TargetId
 from chameleon.io.yaml import dump_yaml, load_yaml
 from chameleon.merge.drift import unified_diff
-from chameleon.merge.engine import MergeEngine, MergeRequest
+from chameleon.merge.engine import MergeEngine, MergeRequest, MergeResult
 from chameleon.merge.resolve import (
     InteractiveResolver,
     NonInteractiveResolver,
@@ -45,6 +45,15 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--neutral", type=str, default=None, help="path to the neutral.yaml file")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help=(
+            "emit per-target progress on stderr, "
+            "summarise per-codec claim and warning counts after merge, "
+            "surface pending state-repo notices and unresolved transactions at every command."
+        ),
+    )
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -174,6 +183,8 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     targets = TargetRegistry.discover()
     resolver = _resolver_from_args(args)
+    if args.verbose:
+        _emit_verbose_preamble(paths, targets)
     engine = MergeEngine(targets=targets, paths=paths, resolver=resolver)
     result = engine.merge(MergeRequest(profile_name=args.profile, dry_run=args.dry_run))
     # On dry-run, render any FileDiffs as a unified diff (one per file the
@@ -200,7 +211,48 @@ def _cmd_merge(args: argparse.Namespace) -> int:
     # operator can find the offending key in their live config.
     for w in result.warnings:
         sys.stderr.write(f"warning: [{w.target.value}/{w.domain.value}] {w.message}\n")
+    if args.verbose:
+        _emit_verbose_summary(result, targets)
     return result.exit_code
+
+
+def _emit_verbose_preamble(paths: StatePaths, targets: TargetRegistry) -> None:
+    """Stderr summary of what's about to run + any pending operator state.
+
+    Surfaces stale transactions and unacknowledged notices at every
+    --verbose invocation so the operator doesn't have to remember to
+    run `chameleon doctor`. The check is cheap; the visibility is
+    valuable.
+    """
+    target_ids = sorted(t.value for t in targets.target_ids())
+    sys.stderr.write(f"verbose: state_root={paths.state_root}\n")
+    sys.stderr.write(f"verbose: neutral={paths.neutral}\n")
+    sys.stderr.write(f"verbose: targets=[{', '.join(target_ids)}]\n")
+    notices = NoticeStore(paths.notices_dir).entries()
+    if notices:
+        sys.stderr.write(f"verbose: {len(notices)} pending notice(s) — run `chameleon doctor`\n")
+    pending_tx = TransactionStore(paths.tx_dir).entries()
+    if pending_tx:
+        sys.stderr.write(
+            f"verbose: {len(pending_tx)} unresolved transaction(s) — run `chameleon doctor`\n"
+        )
+
+
+def _emit_verbose_summary(result: MergeResult, targets: TargetRegistry) -> None:
+    """Per-target warning count tally on stderr after the merge summary.
+
+    Cheap aggregation of what the operator already saw line-by-line; the
+    tally line surfaces the shape of which target(s) had cross-target
+    asymmetries the operator might want to investigate.
+    """
+    counts_by_target: dict[str, int] = {}
+    for w in result.warnings:
+        counts_by_target[w.target.value] = counts_by_target.get(w.target.value, 0) + 1
+    for tid in sorted(t.value for t in targets.target_ids()):
+        n = counts_by_target.get(tid, 0)
+        sys.stderr.write(f"verbose: [{tid}] {n} LossWarning(s)\n")
+    if result.merge_id:
+        sys.stderr.write(f"verbose: merge_id={result.merge_id}\n")
 
 
 def _cmd_targets(args: argparse.Namespace) -> int:
