@@ -437,46 +437,38 @@ _SHARED_PATHS = strats.cross_target_shared_paths()
 # ----------------------------------------------------------------------
 
 _XFAIL_ENCODE_SYMMETRY: dict[FieldPath, str] = {
-    # Note: F-CWD never manifested under encode-symmetry. Pre-Wave-11
-    # both Claude and Codex equally dropped McpServerStdio.cwd (both
-    # lanes recovered cwd=None — no divergence to assert on). After
-    # parity/wave11-fcwd-claude-mcp-cwd + parity/wave11-fcwd-codex-mcp-cwd
-    # both lanes equally preserve cwd — still no divergence. The bug
-    # surfaced under per-lane input round-trip (property 4) and the
-    # Claude->Codex chain (property 2); both are now lossless.
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-G + F-MP-U + F-AU: Codex codec rewrites kind='github' -> 'git', "
-        "kind='url' -> 'git', and drops auto_update without warnings."
-    ),
+    # Wave-11 retired both former entries on this map:
+    # - F-CWD never manifested under encode-symmetry (both lanes
+    #   equally dropped McpServerStdio.cwd; after parity/wave11-fcwd-*
+    #   both equally preserve, still symmetric).
+    # - F-MP fix (parity/wave11-fmp-codex-marketplace) removed
+    #   capabilities.plugin_marketplaces — the Codex codec preserves
+    #   kind='github'/'url' and auto_update via Chameleon-namespaced
+    #   extras. See tests/property/test_codex_marketplace_roundtrip.py.
 }
 
 _XFAIL_DECODE_SYMMETRY: dict[FieldPath, str] = {
-    # F-CWD on capabilities.mcp_servers retired by Wave-11
-    # parity/wave11-fcwd-claude-mcp-cwd (Claude side) +
-    # parity/wave11-fcwd-codex-mcp-cwd (Codex side): both
-    # ``_ClaudeMcpServerStdio`` and ``_CodexMcpServerStdio`` now carry
-    # ``cwd``, so the chained property holds.
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-G chained: github -> git collapse propagates through Codex lane."
-    ),
+    # Wave-11 retired both former entries on this map:
+    # - F-CWD on capabilities.mcp_servers (parity/wave11-fcwd-*):
+    #   both _ClaudeMcpServerStdio and _CodexMcpServerStdio now carry
+    #   cwd, so the chained property holds.
+    # - F-MP-G on capabilities.plugin_marketplaces
+    #   (parity/wave11-fmp-codex-marketplace): the github -> git
+    #   collapse no longer propagates through the Codex lane.
 }
 
 _XFAIL_IDEMPOTENCE: dict[FieldPath, str] = {
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-U: Codex encoder is non-idempotent for kind='url' marketplaces "
-        "(first round emits source_type=None, decode collapses to 'git', "
-        "second round emits source_type='git')."
-    ),
+    # Wave-11 F-MP fix removed ``capabilities.plugin_marketplaces`` —
+    # the Codex encoder is now idempotent for ``kind='url'``
+    # (``chameleon_kind`` tag survives the round-trip and the second
+    # encode emits the same ``source_type=None``).
 }
 
 _XFAIL_PARTIAL_INPUT: dict[FieldPath, str] = {
-    # F-CWD on capabilities.mcp_servers retired by Wave-11
-    # parity/wave11-fcwd-claude-mcp-cwd (Claude side) +
-    # parity/wave11-fcwd-codex-mcp-cwd (Codex side): both lanes now
-    # preserve ``McpServerStdio.cwd`` losslessly.
-    FieldPath(segments=("capabilities", "plugin_marketplaces")): (
-        "F-MP-G + F-AU: see test_encode_symmetry."
-    ),
+    # Wave-11 retired both former entries on this map:
+    # - F-CWD on capabilities.mcp_servers (parity/wave11-fcwd-*).
+    # - F-MP-G + F-AU on capabilities.plugin_marketplaces
+    #   (parity/wave11-fmp-codex-marketplace).
 }
 
 
