@@ -1,0 +1,90 @@
+name: fuzz
+
+# Long-running Hypothesis fuzz job. Runs nightly and on manual
+# dispatch. Mirrors the supply-chain hygiene of ci.yml: every action
+# is pinned to its full commit SHA with the human-readable version in
+# a trailing comment.
+#
+# The fuzz job exercises the same gates ci.yml does (it runs `uv sync
+# --frozen`) but only the fuzz-marked tests under
+# `tests/fuzz/`. The default `pytest` invocation skips them via
+# `-m 'not fuzz'` in pyproject.toml, so this workflow is the only
+# scheduled place they run.
+
+on:
+  schedule:
+    # Daily at 07:00 UTC. Off-peak for both US/EU developer hours so a
+    # long-running fuzz pass doesn't compete with PR CI for runners.
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+    inputs:
+      max_examples_override:
+        description: "Override HYPOTHESIS_MAX_EXAMPLES (advisory; profile defaults still apply)."
+        required: false
+        default: ""
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  fuzz:
+    name: fuzz (Hypothesis fuzz profile)
+    runs-on: ubuntu-latest
+    # 30-minute cap. The fuzz profile is set to 500 examples and a 10s
+    # per-example deadline; even worst-case that's well inside the cap.
+    # If a future Wave-F2 test legitimately needs more, raise the cap
+    # explicitly rather than letting it silently bump.
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+          python-version: "3.13"
+
+      - name: Sync dependencies (frozen)
+        # Same `--frozen` discipline as ci.yml — a stale lock fails
+        # loud here rather than silently using a different version.
+        run: uv sync --frozen
+
+      - name: Run fuzz suite (HYPOTHESIS_PROFILE=fuzz)
+        # No `-n auto` (pytest-xdist) — it isn't a dev dependency, and
+        # this codebase has not opted into parallel test execution.
+        # The fuzz profile's per-example deadline budget is generous
+        # enough that serial execution fits within the timeout cap.
+        env:
+          HYPOTHESIS_PROFILE: fuzz
+        # `|| [ $? -eq 5 ]` tolerates pytest's exit-5 ("no tests
+        # collected") because at Wave-F1 only a single smoke test is
+        # marked `fuzz`; if a future change un-marks it, the workflow
+        # should still pass instead of failing on emptiness. Wave-F2
+        # adds enough fuzz tests that exit-5 becomes a real signal,
+        # at which point this guard can be tightened.
+        run: |
+          set +e
+          uv run pytest -v -m fuzz tests/fuzz/
+          rc=$?
+          set -e
+          if [ "$rc" -eq 5 ]; then
+            echo "::warning::No fuzz tests collected — Wave-F1 only ships scaffolding, this is expected."
+            exit 0
+          fi
+          exit "$rc"
+
+      - name: Upload Hypothesis database
+        # The persistent example DB at .hypothesis/fuzz/ accumulates
+        # interesting examples each run. Uploading it as an artifact
+        # lets the next operator inspect what the fuzzer found, and
+        # paves the way for Wave-F2's corpus-replay fixture.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4.6.2
+        with:
+          name: hypothesis-database
+          path: .hypothesis/
+          if-no-files-found: ignore
+          retention-days: 14

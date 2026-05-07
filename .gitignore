@@ -8,6 +8,9 @@ dist/
 .ruff_cache/
 .ty_cache/
 .hypothesis/
+# .hypothesis/fuzz/ is the per-checkout DirectoryBasedExampleDatabase
+# the fuzz profile (tests/fuzz/conftest.py) writes to. Curated seeds
+# go in tests/fuzz/corpus/ instead — see tests/fuzz/corpus/README.md.
 .coverage
 htmlcov/
 .vscode/

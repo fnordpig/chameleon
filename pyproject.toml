@@ -70,13 +70,23 @@ preview = false
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --strict-config"
+# `-m 'not fuzz'` excludes the Hypothesis-driven fuzz suite from the
+# default `uv run pytest` invocation. Fuzz tests live under
+# `tests/fuzz/` and are exercised either explicitly (`uv run pytest -m
+# fuzz`, default profile) or by the nightly GHA workflow under
+# `HYPOTHESIS_PROFILE=fuzz`. See `tests/fuzz/README.md`.
+addopts = "-ra --strict-markers --strict-config -m 'not fuzz'"
 filterwarnings = ["error"]
 markers = [
     "schema_drift: validates codec field-paths against generated upstream models",
     "concurrency: exercises partial-ownership concurrency discipline",
     "recovery: exercises transaction-marker recovery",
     "golden: byte-identical golden-file fixtures",
+    # Two Hypothesis profiles drive the fuzz suite (see tests/fuzz/conftest.py):
+    #   * default: 50 examples, 200ms deadline (fast local pre-push smoke).
+    #   * fuzz:    500 examples, 10s deadline, persistent DB at .hypothesis/fuzz/
+    #              (nightly GHA workflow, HYPOTHESIS_PROFILE=fuzz).
+    "fuzz: long-running Hypothesis-driven fuzz tests; excluded from default suite",
 ]
 
 [tool.ty.src]
