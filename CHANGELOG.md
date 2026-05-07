@@ -9,6 +9,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.5.1] — 2026-05-07
+
+A documentation-and-tag release for two operator-visible bug fixes
+that landed inside the 0.5.0 commit but were not called out in 0.5.0's
+CHANGELOG. Code is identical to the 0.5.0 SHA `d6a0220`; this entry
+catalogues the fixes so operators can see what changed.
+
+### Fixed
+
+- **Codex `model_catalog_path` no longer accretes machine-specific
+  absolute paths into neutral.** Reading
+  `model_catalog_json = "/Users/<operator>/.codex/model-catalog-600k.json"`
+  from a Codex `config.toml` previously stored the absolute path
+  verbatim in `identity.model_catalog_path`. A neutral.yaml that round-
+  tripped on one machine would then fail to apply cleanly on another
+  operator's machine (or even the same operator on a different host)
+  because the absolute path wouldn't resolve. The Codex identity
+  codec's `from_target` now collapses paths under the current
+  operator's `$HOME` to a `~`-prefixed form before they land in
+  neutral. Encode is unchanged — `os.path.expanduser` runs at the
+  Codex live-write boundary, so what's written to disk is still an
+  absolute path the Codex CLI can read directly.
+
+- **Target-side deletions now propagate forward into neutral instead
+  of being overwritten on every merge.** Previously, if an operator
+  removed a setting from `~/.codex/config.toml` (or `~/.claude/settings.json`)
+  the engine treated the codec's default-valued return as "silence"
+  rather than "the target cleared this," which meant the next merge
+  would force the old value back to disk. Codecs can now declare
+  `neutral_claimed_paths` — a frozenset of neutral leaves the codec
+  asserts ownership over. When a per-target reverse-codec returns the
+  schema default for a claimed path, the engine treats that as real
+  evidence of intent (deletion) rather than absence of evidence.
+  Combined with `--on-conflict=latest` and a target file with a more
+  recent mtime than neutral, the deletion is preserved through the
+  merge cycle. Both Claude and Codex identity codecs ship with
+  `neutral_claimed_paths` populated for their first-class identity
+  fields (model, reasoning_effort, thinking, auth.method,
+  api_key_helper for Claude; model, reasoning_effort, context_window,
+  compact_threshold, model_catalog_path, auth.method for Codex).
+
+### Tests
+
+- New `tests/integration/test_target_deletions.py`: end-to-end
+  scenario removing `model_context_window`,
+  `model_auto_compact_token_limit`, and `model_catalog_json` from a
+  Codex config and asserting the deletion survives the next merge
+  rather than being clobbered by neutral.
+- Added round-trip coverage in
+  `tests/property/test_codex_identity_extras_codec.py` for the
+  `~`-collapse path so a regression here surfaces at the codec level
+  before the integration smoke notices.
+
 ## [0.5.0] — 2026-05-07
 
 A merge-UX release. The merge engine now remembers what the operator
