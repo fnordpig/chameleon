@@ -45,6 +45,54 @@ class CodexGovernanceCodec:
         section = CodexGovernanceSection()
         if model.features:
             section.features = dict(model.features)
+
+        # Detect duplicate paths within either list. The wire shape
+        # (``projects.<path>.trust_level`` keyed by path string) cannot
+        # represent duplicates — a second occurrence collapses onto the
+        # first dict slot. Surface the loss explicitly per A-TRUST.
+        trusted_dupes = sorted(
+            {p for p in model.trust.trusted_paths if model.trust.trusted_paths.count(p) > 1}
+        )
+        untrusted_dupes = sorted(
+            {p for p in model.trust.untrusted_paths if model.trust.untrusted_paths.count(p) > 1}
+        )
+        if trusted_dupes or untrusted_dupes:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.GOVERNANCE,
+                    target=BUILTIN_CODEX,
+                    message=(
+                        "A-TRUST: Trust.duplicate_paths — Codex `projects.<path>` "
+                        "is keyed by path string, so duplicate entries within a "
+                        "trust list collapse to a single wire key; "
+                        f"trusted_paths duplicates={trusted_dupes!r}, "
+                        f"untrusted_paths duplicates={untrusted_dupes!r}"
+                    ),
+                )
+            )
+
+        # Detect paths that appear in BOTH trusted and untrusted. The
+        # wire shape can hold only one trust_level per path, so the
+        # second-written list clobbers the first (last-write-wins:
+        # untrusted_paths overrides trusted_paths because it is
+        # serialised second below). Per A-TRUST, surface the loss.
+        trusted_set = set(model.trust.trusted_paths)
+        untrusted_set = set(model.trust.untrusted_paths)
+        both = sorted(trusted_set & untrusted_set)
+        if both:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.GOVERNANCE,
+                    target=BUILTIN_CODEX,
+                    message=(
+                        "A-TRUST: Trust.both_trusted_and_untrusted — paths appear "
+                        "in both trusted_paths and untrusted_paths; Codex stores "
+                        "a single trust_level per path, so untrusted_paths wins "
+                        f"(serialised last); paths={both!r}"
+                    ),
+                )
+            )
+
         for path in model.trust.trusted_paths:
             section.projects[path] = _CodexProject(trust_level="trusted")
         for path in model.trust.untrusted_paths:
