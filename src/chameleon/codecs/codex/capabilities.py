@@ -36,6 +36,19 @@ class _CodexMcpServerStdio(BaseModel):
     command: str
     args: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
+    # F-CWD (Wave-11): Codex's upstream ``RawMcpServerConfig`` (see
+    # ``codex-rs/protocol/src/config_types.rs``, mirrored here in
+    # ``_generated.py`` as ``cwd: Optional[str]``) carries an optional
+    # working-directory field for stdio MCP entries. Without modelling it
+    # here, the neutral schema's first-class ``McpServerStdio.cwd``
+    # silently dropped through the Codex lane on ``to_target`` /
+    # ``from_target`` — matching the Wave-11 Claude-side fix
+    # (parity/wave11-fcwd-claude-mcp-cwd) closes the round-trip on the
+    # Codex half so the cross-target fuzzer's
+    # ``test_decode_symmetry_via_cross_target[capabilities.mcp_servers]``
+    # and ``test_no_silent_divergence_on_partial_input`` xfails can be
+    # retired.
+    cwd: str | None = None
 
 
 class _CodexMcpServerHttp(BaseModel):
@@ -128,6 +141,7 @@ class CodexCapabilitiesCodec:
                     command=server.command,
                     args=list(server.args),
                     env=dict(server.env),
+                    cwd=server.cwd,
                 )
             elif isinstance(server, McpServerStreamableHttp):
                 section.mcp_servers[name] = _CodexMcpServerHttp(
@@ -160,7 +174,10 @@ class CodexCapabilitiesCodec:
             raw = section.mcp_servers[name]
             if isinstance(raw, _CodexMcpServerStdio):
                 servers[name] = McpServerStdio(
-                    command=raw.command, args=list(raw.args), env=dict(raw.env)
+                    command=raw.command,
+                    args=list(raw.args),
+                    env=dict(raw.env),
+                    cwd=raw.cwd,
                 )
             elif isinstance(raw, _CodexMcpServerHttp):
                 servers[name] = McpServerStreamableHttp.model_validate(

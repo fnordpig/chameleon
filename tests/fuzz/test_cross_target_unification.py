@@ -92,14 +92,15 @@ pytestmark = pytest.mark.fuzz
 # user named as their primary concern: "valid settings files that fail
 # to correctly transpile to the other dialect".
 #
-# F-CWD  | capabilities.mcp_servers | Claude codec silently drops
-#        | McpServerStdio.cwd. The neutral schema models cwd as a
-#        | first-class field; `_ClaudeMcpServerStdio` does not. Encoding
-#        | through Claude and decoding back yields cwd=None for any
-#        | input where cwd was set, with no LossWarning.
-#        | Site: src/chameleon/codecs/claude/capabilities.py
-#        |   `_ClaudeMcpServerStdio` is missing a `cwd: str | None` field
-#        |   and the `to_target` / `from_target` paths don't carry it.
+# F-CWD  | capabilities.mcp_servers | RESOLVED in Wave-11 by the paired
+#        | branches parity/wave11-fcwd-claude-mcp-cwd (Claude side) and
+#        | parity/wave11-fcwd-codex-mcp-cwd (Codex side). Both
+#        | `_ClaudeMcpServerStdio` and `_CodexMcpServerStdio` now carry
+#        | `cwd: str | None` and thread it through to_target/from_target.
+#        | Original symptom: the neutral schema models cwd as a first-
+#        | class field but neither codec did, so encoding through either
+#        | lane and decoding back yielded cwd=None for any input where
+#        | cwd was set, with no LossWarning.
 #
 # F-MP-G | capabilities.plugin_marketplaces | Codex codec silently
 #        | rewrites kind='github' marketplaces to kind='git' when
@@ -436,10 +437,13 @@ _SHARED_PATHS = strats.cross_target_shared_paths()
 # ----------------------------------------------------------------------
 
 _XFAIL_ENCODE_SYMMETRY: dict[FieldPath, str] = {
-    # Note: F-CWD does NOT manifest under encode-symmetry — both Claude
-    # and Codex codecs equally drop McpServerStdio.cwd, so the two lanes
-    # agree (both recover cwd=None). The bug surfaces under per-lane
-    # input round-trip (property 4) and Claude->Codex chain (property 2).
+    # Note: F-CWD never manifested under encode-symmetry. Pre-Wave-11
+    # both Claude and Codex equally dropped McpServerStdio.cwd (both
+    # lanes recovered cwd=None — no divergence to assert on). After
+    # parity/wave11-fcwd-claude-mcp-cwd + parity/wave11-fcwd-codex-mcp-cwd
+    # both lanes equally preserve cwd — still no divergence. The bug
+    # surfaced under per-lane input round-trip (property 4) and the
+    # Claude->Codex chain (property 2); both are now lossless.
     FieldPath(segments=("capabilities", "plugin_marketplaces")): (
         "F-MP-G + F-MP-U + F-AU: Codex codec rewrites kind='github' -> 'git', "
         "kind='url' -> 'git', and drops auto_update without warnings."
@@ -447,9 +451,11 @@ _XFAIL_ENCODE_SYMMETRY: dict[FieldPath, str] = {
 }
 
 _XFAIL_DECODE_SYMMETRY: dict[FieldPath, str] = {
-    FieldPath(segments=("capabilities", "mcp_servers")): (
-        "F-CWD chained: cwd dropped by Claude lane is not restored by Codex lane."
-    ),
+    # F-CWD on capabilities.mcp_servers retired by Wave-11
+    # parity/wave11-fcwd-claude-mcp-cwd (Claude side) +
+    # parity/wave11-fcwd-codex-mcp-cwd (Codex side): both
+    # ``_ClaudeMcpServerStdio`` and ``_CodexMcpServerStdio`` now carry
+    # ``cwd``, so the chained property holds.
     FieldPath(segments=("capabilities", "plugin_marketplaces")): (
         "F-MP-G chained: github -> git collapse propagates through Codex lane."
     ),
@@ -464,7 +470,10 @@ _XFAIL_IDEMPOTENCE: dict[FieldPath, str] = {
 }
 
 _XFAIL_PARTIAL_INPUT: dict[FieldPath, str] = {
-    FieldPath(segments=("capabilities", "mcp_servers")): ("F-CWD: see test_encode_symmetry."),
+    # F-CWD on capabilities.mcp_servers retired by Wave-11
+    # parity/wave11-fcwd-claude-mcp-cwd (Claude side) +
+    # parity/wave11-fcwd-codex-mcp-cwd (Codex side): both lanes now
+    # preserve ``McpServerStdio.cwd`` losslessly.
     FieldPath(segments=("capabilities", "plugin_marketplaces")): (
         "F-MP-G + F-AU: see test_encode_symmetry."
     ),
