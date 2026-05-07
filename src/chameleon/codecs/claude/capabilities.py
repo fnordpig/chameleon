@@ -153,6 +153,26 @@ class ClaudeCapabilitiesCodec:
         # ``mcp_servers`` (which depends on per-target reverse-codec
         # iteration) leaks into ``settings.json``.
         section = ClaudeCapabilitiesSection()
+        # Wave-10 §15.x — Claude has no top-level web-search mode setting.
+        # The web-search lane is gated by ``permissions.allow``/``deny``
+        # against the WebFetch / WebSearch tool names, which is structurally
+        # different from neutral's ``cached``/``live``/``disabled`` axis.
+        # Surface the drop as a typed warning rather than guess.
+        if model.web_search is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.CAPABILITIES,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        f"capabilities.web_search ({model.web_search!r}) has no "
+                        "Claude analogue (Claude gates web-search via the "
+                        "WebFetch/WebSearch permissions tool-pattern, not a "
+                        "tri-valued cached/live/disabled axis); dropping during "
+                        "to_target."
+                    ),
+                    field_path=FieldPath(segments=("web_search",)),
+                )
+            )
         for name in sorted(model.mcp_servers):
             server = model.mcp_servers[name]
             if isinstance(server, McpServerStdio):

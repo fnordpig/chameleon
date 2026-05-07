@@ -206,6 +206,23 @@ class ClaudeDirectivesCodec:
                     field_path=FieldPath(segments=("personality",)),
                 ),
             )
+        if model.verbosity is not None:
+            # Wave-10 §15.x — Claude has no top-level ``verbosity`` setting.
+            # The closest analogue is the runtime ``/verbosity`` slash command,
+            # which doesn't persist to settings.json. Surface the drop as a
+            # typed warning rather than guess. The value continues to
+            # round-trip through the Codex codec lane.
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.DIRECTIVES,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        f"directives.verbosity ({model.verbosity.value!r}) has "
+                        "no persistent Claude analogue; dropping during to_target."
+                    ),
+                    field_path=FieldPath(segments=("verbosity",)),
+                ),
+            )
         return section
 
     @staticmethod

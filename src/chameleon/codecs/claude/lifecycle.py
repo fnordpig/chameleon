@@ -133,6 +133,41 @@ class ClaudeLifecycleCodec:
                     message="lifecycle.telemetry not propagated to Claude in V0 (§15.2)",
                 )
             )
+        # Wave-10 §15.x — lifecycle.history.persistence has no Claude analogue
+        # at the settings-file level. Claude does expose
+        # CLAUDE_CODE_SKIP_PROMPT_HISTORY as an environment variable that
+        # toggles transcript writes entirely, but that lives under the
+        # ``env`` key (owned by ClaudeEnvironmentCodec) and is a binary
+        # on/off rather than the persistence enum's ``save-all``/``none``
+        # axis. Surface the drop as a typed warning rather than re-route
+        # through env (which would require cross-codec coupling).
+        if model.history.persistence is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.LIFECYCLE,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        f"lifecycle.history.persistence "
+                        f"({model.history.persistence.value!r}) has no Claude "
+                        "settings.json analogue (the closest analogue is the "
+                        "CLAUDE_CODE_SKIP_PROMPT_HISTORY env var, owned by the "
+                        "environment codec); dropping during to_target."
+                    ),
+                    field_path=FieldPath(segments=("history", "persistence")),
+                )
+            )
+        if model.history.max_bytes is not None:
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.LIFECYCLE,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "lifecycle.history.max_bytes has no Claude settings.json "
+                        "analogue; dropping during to_target."
+                    ),
+                    field_path=FieldPath(segments=("history", "max_bytes")),
+                )
+            )
         return section
 
     @staticmethod

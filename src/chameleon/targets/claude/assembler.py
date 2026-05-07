@@ -74,7 +74,13 @@ class ClaudeAssembler:
 
         identity = per_domain.get(Domains.IDENTITY)
         if isinstance(identity, ClaudeIdentitySection):
-            for k, v in identity.model_dump(exclude_none=True).items():
+            # ``by_alias=True`` is needed for the Wave-10 §15.x fields
+            # (``forceLoginMethod``, ``apiKeyHelper``) which carry the
+            # upstream wire name as a Pydantic alias. Existing fields
+            # without an alias (``model``, ``effortLevel``,
+            # ``alwaysThinkingEnabled``) continue to dump under their
+            # Python attribute names, which already match the wire.
+            for k, v in identity.model_dump(by_alias=True, exclude_none=True).items():
                 settings_obj[k] = v
 
         directives = per_domain.get(Domains.DIRECTIVES)
@@ -192,7 +198,16 @@ class ClaudeAssembler:
         if not isinstance(settings, dict):
             settings = {}
 
-        identity_keys = {"model", "effortLevel", "alwaysThinkingEnabled"}
+        identity_keys = {
+            "model",
+            "effortLevel",
+            "alwaysThinkingEnabled",
+            # Wave-10 §15.x — auth.method ↔ forceLoginMethod, plus
+            # auth.api_key_helper ↔ apiKeyHelper. Both live in settings.json
+            # at top level and are claimed by ClaudeIdentityCodec.
+            "forceLoginMethod",
+            "apiKeyHelper",
+        }
         # The legacy bool aliases (coauthoredBy, gitAttribution) are
         # community/older variants the schemastore-derived ClaudeSettings
         # does not model; the directives codec accepts them at section
