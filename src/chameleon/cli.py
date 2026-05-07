@@ -43,7 +43,6 @@ from chameleon.targets._registry import TargetRegistry
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--neutral", type=str, default=None, help="path to the neutral.yaml file")
-    parser.add_argument("--verbose", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
 
@@ -129,6 +128,20 @@ def _resolve_paths(args: argparse.Namespace) -> StatePaths:
 def _cmd_init(args: argparse.Namespace) -> int:
     paths = _resolve_paths(args)
     targets = TargetRegistry.discover()
+    n_targets = sum(1 for _ in targets.target_ids())
+
+    if args.dry_run:
+        # Dry-run is side-effect-free. Describe what init WOULD do without
+        # writing the neutral file or invoking the merge engine's write
+        # path. The follow-up `chameleon init` (no flag) does the work.
+        sys.stdout.write("init --dry-run: side-effect-free; would do the following:\n")
+        if not paths.neutral.exists():
+            sys.stdout.write(f"  - create neutral file at {paths.neutral}\n")
+        else:
+            sys.stdout.write(f"  - leave existing neutral file at {paths.neutral}\n")
+        sys.stdout.write(f"  - run merge with strategy=KEEP across {n_targets} target(s)\n")
+        sys.stdout.write("  - rerun without --dry-run to apply\n")
+        return 0
 
     if not paths.neutral.exists():
         paths.neutral.parent.mkdir(parents=True, exist_ok=True)
@@ -138,7 +151,7 @@ def _cmd_init(args: argparse.Namespace) -> int:
 
     strategy = Strategy(kind=OnConflict.KEEP)
     engine = MergeEngine(targets=targets, paths=paths, strategy=strategy)
-    result = engine.merge(MergeRequest(dry_run=args.dry_run))
+    result = engine.merge(MergeRequest(dry_run=False))
     sys.stdout.write(f"init: {result.summary}\n")
     return result.exit_code
 
