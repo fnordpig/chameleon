@@ -51,10 +51,10 @@ from chameleon._types import FieldPath, JsonValue, TargetId
 from chameleon.schema._constants import BUILTIN_CLAUDE, BUILTIN_CODEX
 from chameleon.schema.authorization import (
     Authorization,
-    DefaultMode,
     FilesystemPolicy,
     NetworkPolicy,
     Reviewer,
+    SandboxMode,
 )
 from chameleon.schema.capabilities import (
     Capabilities,
@@ -484,7 +484,7 @@ network_policies: st.SearchStrategy[NetworkPolicy] = st.builds(
 
 authorizations: st.SearchStrategy[Authorization] = st.builds(
     Authorization,
-    default_mode=_opt(st.sampled_from(list(DefaultMode))),
+    sandbox_mode=_opt(st.sampled_from(list(SandboxMode))),
     filesystem=filesystem_policies,
     network=network_policies,
     allow_patterns=_cap_list(_short_text()),

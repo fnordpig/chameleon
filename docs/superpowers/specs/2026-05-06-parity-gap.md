@@ -178,6 +178,19 @@ The original §15.1 deferral. Now P3 because P1 surfaces it: Claude's
 Codex's named `[permissions.<name>]` profiles in the V0 codec, but
 the operator clearly uses both. Needs design before implementation.
 
+**Wave-13 closure (LCD interpretation):** the design exploration in
+`docs/superpowers/specs/2026-05-06-p3-authorization-design.md` settled
+on a lowest-common-denominator unification. No translation between the
+two pattern languages; lossless on the small structurally-common
+subset (global mode/policy and approval policy); pass-through for
+everything richer via `targets.{claude,codex}.items["permissions"]`;
+`LossWarning` on the cross-target asymmetry. Wave-13 S1 ships the
+schema half (`SandboxMode` rename + new `PermissionMode` and
+`ApprovalPolicy` enums in `src/chameleon/schema/authorization.py`).
+S2 (Claude codec) and S3 (Codex codec) follow in the next wave and
+consume the new vocabulary; the cross-target fuzzer auto-picks up the
+resulting xfails, which the codec waves document explicitly.
+
 ## The DAG
 
 ```

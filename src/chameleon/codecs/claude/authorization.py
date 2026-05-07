@@ -1,7 +1,11 @@
 """Claude codec for the authorization domain.
 
-V0 thin slice:
-  default_mode                          ↔ permissions.defaultMode
+V0 thin slice (Wave-13 S1 schema rename — codec body is unchanged
+mechanically because we only renamed the type, not its values; S2 will
+rewrite this codec to consume the LCD schema's new ``permission_mode``
+and ``approval_policy`` fields):
+
+  sandbox_mode                          ↔ permissions.defaultMode
                                           + sandbox.enabled (full-access → False)
   filesystem.{allow,deny}_{read,write}  ↔ sandbox.filesystem.{allow,deny}{Read,Write}
   network.{allowed,denied}_domains      ↔ sandbox.network.{allowed,denied}Domains
@@ -11,9 +15,9 @@ V0 thin slice:
   deny_patterns                         ↔ permissions.deny
 
 Mapping rationale (and known asymmetries):
-  - neutral.default_mode "read-only"      → defaultMode "default"      + sandbox.enabled True
-  - neutral.default_mode "workspace-write"→ defaultMode "acceptEdits"  + sandbox.enabled True
-  - neutral.default_mode "full-access"    → defaultMode "bypassPermissions" + sandbox.enabled False
+  - neutral.sandbox_mode "read-only"      → defaultMode "default"      + sandbox.enabled True
+  - neutral.sandbox_mode "workspace-write"→ defaultMode "acceptEdits"  + sandbox.enabled True
+  - neutral.sandbox_mode "full-access"    → defaultMode "bypassPermissions" + sandbox.enabled False
   Reverse uses the same table; unrecognized values warn and drop.
 
 This is the V0 codec for §15.1 — the full design (granular approval
@@ -32,9 +36,9 @@ from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.authorization import (
     Authorization,
-    DefaultMode,
     FilesystemPolicy,
     NetworkPolicy,
+    SandboxMode,
 )
 
 
@@ -74,15 +78,15 @@ class ClaudeAuthorizationSection(BaseModel):
     sandbox: _ClaudeSandbox = Field(default_factory=_ClaudeSandbox)
 
 
-_DEFAULT_MODE_TO_CLAUDE: dict[DefaultMode, tuple[str, bool]] = {
-    DefaultMode.READ_ONLY: ("default", True),
-    DefaultMode.WORKSPACE_WRITE: ("acceptEdits", True),
-    DefaultMode.FULL_ACCESS: ("bypassPermissions", False),
+_SANDBOX_MODE_TO_CLAUDE: dict[SandboxMode, tuple[str, bool]] = {
+    SandboxMode.READ_ONLY: ("default", True),
+    SandboxMode.WORKSPACE_WRITE: ("acceptEdits", True),
+    SandboxMode.FULL_ACCESS: ("bypassPermissions", False),
 }
-_CLAUDE_TO_DEFAULT_MODE: dict[str, DefaultMode] = {
-    "default": DefaultMode.READ_ONLY,
-    "acceptEdits": DefaultMode.WORKSPACE_WRITE,
-    "bypassPermissions": DefaultMode.FULL_ACCESS,
+_CLAUDE_TO_SANDBOX_MODE: dict[str, SandboxMode] = {
+    "default": SandboxMode.READ_ONLY,
+    "acceptEdits": SandboxMode.WORKSPACE_WRITE,
+    "bypassPermissions": SandboxMode.FULL_ACCESS,
 }
 
 
@@ -110,8 +114,8 @@ class ClaudeAuthorizationCodec:
     @staticmethod
     def to_target(model: Authorization, ctx: TranspileCtx) -> ClaudeAuthorizationSection:
         section = ClaudeAuthorizationSection()
-        if model.default_mode is not None:
-            mode, sandbox_enabled = _DEFAULT_MODE_TO_CLAUDE[model.default_mode]
+        if model.sandbox_mode is not None:
+            mode, sandbox_enabled = _SANDBOX_MODE_TO_CLAUDE[model.sandbox_mode]
             section.permissions.defaultMode = mode
             section.sandbox.enabled = sandbox_enabled
         section.permissions.allow = list(model.allow_patterns)
@@ -158,9 +162,9 @@ class ClaudeAuthorizationCodec:
     def from_target(section: ClaudeAuthorizationSection, ctx: TranspileCtx) -> Authorization:
         auth = Authorization()
         if section.permissions.defaultMode is not None:
-            mapped = _CLAUDE_TO_DEFAULT_MODE.get(section.permissions.defaultMode)
+            mapped = _CLAUDE_TO_SANDBOX_MODE.get(section.permissions.defaultMode)
             if mapped is not None:
-                auth.default_mode = mapped
+                auth.sandbox_mode = mapped
             else:
                 ctx.warn(
                     LossWarning(
