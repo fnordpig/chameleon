@@ -210,10 +210,22 @@ def _normalize_codex_config(raw: dict[str, Any]) -> dict[str, Any]:
     # ``last_revision`` cache state is dropped during round-trip.
     # Strip those keys on both sides so the main roundtrip assertion
     # ignores this axis.
+    #
+    # Also strip ``chameleon_kind`` / ``chameleon_repo`` — these are the
+    # F-MP-G round-trip hints chameleon writes into Codex marketplace
+    # tables to preserve the neutral ``kind='github'`` discriminator
+    # that Codex's ``source_type`` enum cannot represent. Pre-image
+    # exemplar entries don't carry them; post-merge they do for
+    # github-URL entries (see _url.parse_github_url canonicalization).
     if isinstance(out.get("marketplaces"), dict):
         for name, body in list(out["marketplaces"].items()):
             if isinstance(body, dict):
-                cache_keys = {"last_updated", "last_revision"}
+                cache_keys = {
+                    "last_updated",
+                    "last_revision",
+                    "chameleon_kind",
+                    "chameleon_repo",
+                }
                 stripped = {k: v for k, v in body.items() if k not in cache_keys}
                 out["marketplaces"][name] = stripped
 

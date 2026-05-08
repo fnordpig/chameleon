@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
+from chameleon.codecs._url import parse_github_url
 from chameleon.schema._constants import BUILTIN_CLAUDE, Domains
 from chameleon.schema.capabilities import (
     Capabilities,
@@ -113,6 +114,27 @@ _ClaudeMarketplaceSource = (
 )
 
 
+# Marketplaces compiled into Claude Code itself — keys in
+# ``enabledPlugins`` of the form ``<plugin>@<one-of-these>`` resolve
+# without an ``extraKnownMarketplaces`` declaration. The list is
+# small and stable; it grows when Anthropic ships a new built-in
+# marketplace and we observe it in the wild.
+#
+# When chameleon assembles Claude's ``enabledPlugins`` from neutral,
+# any key whose marketplace is NOT in this set AND not in
+# ``model.plugin_marketplaces`` is dropped — Claude crashes on read
+# with ``error: Plugin foo@bar is not cached at (not recorded)``,
+# which is the exact failure the operator hit after running
+# ``chameleon merge`` against a Codex config that declared plugins for
+# marketplaces only Codex knew about.
+_CLAUDE_BUILTIN_MARKETPLACES: frozenset[str] = frozenset(
+    {
+        "claude-plugins-official",
+        "anthropic-agent-skills",
+    }
+)
+
+
 class _ClaudeMarketplace(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -197,8 +219,45 @@ class ClaudeCapabilitiesCodec:
                     bearer_token_env_var=server.bearer_token_env_var,
                     http_headers=dict(server.http_headers),
                 )
+        # Defensive plugin emit: only write ``enabledPlugins[k]`` when
+        # the marketplace component (after ``@``) is something Claude
+        # can resolve at runtime — either declared in
+        # ``plugin_marketplaces`` (assembled into ``extraKnownMarketplaces``
+        # alongside) or one of Claude's compiled-in builtins. Codex
+        # tolerates plugin keys whose marketplaces aren't declared
+        # locally, but Claude raises ``error: Plugin foo@bar is not
+        # cached at (not recorded)`` on read for any unresolvable key.
+        # Surface the drop via a single LossWarning that lists every
+        # affected key so the operator can either declare the missing
+        # marketplace or accept the drop.
+        known_marketplaces: frozenset[str] = (
+            frozenset(model.plugin_marketplaces) | _CLAUDE_BUILTIN_MARKETPLACES
+        )
+        dropped: list[tuple[str, str]] = []  # (plugin_key, marketplace_id-or-empty)
         for plugin_key in sorted(model.plugins):
-            section.enabled_plugins[plugin_key] = model.plugins[plugin_key].enabled
+            mp_id = plugin_key.rsplit("@", 1)[1] if "@" in plugin_key else ""
+            if mp_id and mp_id in known_marketplaces:
+                section.enabled_plugins[plugin_key] = model.plugins[plugin_key].enabled
+            else:
+                dropped.append((plugin_key, mp_id))
+        if dropped:
+            dropped_summary = ", ".join(
+                f"{k!r} (marketplace={m!r})" if m else f"{k!r} (no @marketplace)"
+                for k, m in dropped
+            )
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.CAPABILITIES,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "dropping plugins from enabledPlugins because their "
+                        "marketplace is neither declared in extraKnownMarketplaces "
+                        "nor a Claude built-in: "
+                        f"{dropped_summary}"
+                    ),
+                    field_path=FieldPath(segments=("enabledPlugins",)),
+                )
+            )
         for mp_name in sorted(model.plugin_marketplaces):
             section.extra_known_marketplaces[mp_name] = _claude_marketplace_from_neutral(
                 model.plugin_marketplaces[mp_name]
@@ -292,7 +351,23 @@ def _claude_marketplace_to_neutral(
     if isinstance(s, _ClaudeMarketplaceSourceGithub):
         neutral_src = PluginMarketplaceSource(kind="github", repo=s.repo, ref=s.ref)
     elif isinstance(s, _ClaudeMarketplaceSourceGit):
-        neutral_src = PluginMarketplaceSource(kind="git", url=s.url, ref=s.ref)
+        # Canonicalize hand-authored ``source: 'git'`` entries whose URL is
+        # actually a github repo — the operator may have written the
+        # ``git`` form, but Claude's native preferred shape for github-
+        # hosted plugins is ``source: 'github'`` with structured
+        # ``repo: 'owner/name'``. Neutral always holds the higher-detail
+        # form so the next assemble re-emits Claude in its preferred
+        # shape and cross-target merge sees a single canonical value.
+        gh = parse_github_url(s.url)
+        if gh is not None:
+            owner, repo_name = gh
+            neutral_src = PluginMarketplaceSource(
+                kind="github",
+                repo=f"{owner}/{repo_name}",
+                ref=s.ref,
+            )
+        else:
+            neutral_src = PluginMarketplaceSource(kind="git", url=s.url, ref=s.ref)
     elif isinstance(s, _ClaudeMarketplaceSourceUrl):
         neutral_src = PluginMarketplaceSource(kind="url", url=s.url)
     elif isinstance(s, _ClaudeMarketplaceSourceLocal):

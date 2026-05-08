@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
+from chameleon.codecs._url import parse_github_url
 from chameleon.codecs.codex._generated import WebSearchMode
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.capabilities import (
@@ -349,9 +350,23 @@ def _codex_marketplace_to_neutral(
     elif entry.source_type == "local":
         neutral_src = PluginMarketplaceSource(kind="local", path=entry.source)
     else:
-        # source_type == "git" or unset; use ``git`` kind by default — this is
-        # how Codex always stores remote marketplaces.
-        neutral_src = PluginMarketplaceSource(kind="git", url=entry.source, ref=entry.ref)
+        # source_type == "git" or unset. Canonicalize hand-authored github
+        # URLs (no chameleon_kind hint) to ``kind='github'`` so neutral
+        # always holds the higher-detail form. Non-github git URLs stay
+        # ``kind='git'``. Documented in
+        # ``PluginMarketplaceSource``: "the neutral form normalizes to a
+        # small kind discriminator that round-trips both" (highest detail
+        # in neutral; target-preferred shape at emit).
+        gh = parse_github_url(entry.source)
+        if gh is not None:
+            owner, repo_name = gh
+            neutral_src = PluginMarketplaceSource(
+                kind="github",
+                repo=f"{owner}/{repo_name}",
+                ref=entry.ref,
+            )
+        else:
+            neutral_src = PluginMarketplaceSource(kind="git", url=entry.source, ref=entry.ref)
     return PluginMarketplace(source=neutral_src, auto_update=entry.auto_update)
 
 

@@ -9,6 +9,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.5.2] — 2026-05-07
+
+Two operator-visible bug fixes for plugin-loading errors observed after
+running `chameleon merge` against a real Claude Code + Codex CLI pair.
+
+### Fixed
+
+- **GitHub-URL marketplaces now canonicalize to `kind="github"` on
+  disassemble.** Pre-fix, hand-authoring `source: "git"` with a
+  `https://github.com/...` URL on Claude (or just a raw github URL in
+  a Codex `[marketplaces.<name>]` table) produced neutral `kind="git"`,
+  while the same intent expressed on the other target's native form
+  produced `kind="github"`. `classify_change` then surfaced the cross-
+  target divergence as a `CONFLICT`, and resolution (interactive choice,
+  `OnConflict.LATEST`, or persisted prior decision) could pick the
+  lower-detail `kind="git"` shape — collapsing Claude's structured
+  `{source: "github", repo: "owner/name"}` into `{source: "git", url:
+  "https://github.com/owner/name.git"}` on re-derive. Both codec
+  disassemble paths now parse the URL via the new
+  `chameleon.codecs._url.parse_github_url` helper and promote
+  canonical `https://github.com/<owner>/<name>(.git)?` and
+  `git@github.com:<owner>/<name>(.git)?` forms to neutral
+  `kind="github"`. Custom SSH aliases (`git@github-org:...`),
+  `gist.github.com` URLs, and sub-paths are intentionally NOT promoted
+  — they carry operator intent the canonical `github` shape cannot
+  express. Matches the documented design intent on
+  `PluginMarketplaceSource`: "the neutral form normalizes to a small
+  `kind` discriminator that round-trips both" (highest detail in
+  neutral; target-preferred shape at emit). One-time canonicalization
+  effect: any `~/.claude/settings.json` `source: "git"` entries pointing
+  at github.com URLs are rewritten to `source: "github"` on next sync,
+  and Codex marketplace tables gain `chameleon_kind = "github"` /
+  `chameleon_repo = "..."` round-trip hints.
+
+- **Claude `enabledPlugins` no longer accumulates unresolvable plugin
+  keys.** Codex tolerates `[plugins."<name>@<marketplace>"]` keys whose
+  `<marketplace>` is not declared as a `[marketplaces.<marketplace>]`
+  table — they're inert until resolved. Pre-fix, chameleon's cross-
+  target unification carried those Codex-only keys through to Claude's
+  `enabledPlugins`, where Claude reads them at startup and crashes
+  with `error: Plugin foo@bar is not cached at (not recorded)` because
+  it consults its marketplace cache and finds nothing. The Claude
+  capabilities codec now filters at assemble time: an
+  `enabledPlugins[k]` is only emitted when `k`'s `@marketplace`
+  component is in `model.plugin_marketplaces` or in the small
+  built-ins set (`claude-plugins-official`, `anthropic-agent-skills`).
+  Dropped keys are surfaced via a single `LossWarning` listing every
+  affected plugin and its missing marketplace so operators can either
+  declare the marketplace or accept the drop.
+
 ## [0.5.1] — 2026-05-07
 
 A documentation-and-tag release for two operator-visible bug fixes

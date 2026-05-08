@@ -285,6 +285,64 @@ def test_hand_authored_git_entry_decodes_to_kind_git() -> None:
     assert neutral.auto_update is None
 
 
+def test_hand_authored_github_https_url_canonicalizes_to_kind_github() -> None:
+    """A hand-authored Codex marketplace whose ``source`` is a canonical
+    ``https://github.com/<owner>/<name>`` URL canonicalizes to
+    ``kind='github'`` on disassemble — neutral always holds the
+    higher-detail form (the user's design instruction: "highest detail
+    in neutral").
+
+    Pre-fix: the codec's ``else`` branch defaulted any ``source_type='git'``
+    or unset entry to ``kind='git'`` even when the URL was a github repo,
+    leaving cross-target merge to choose between Claude's ``kind='github'``
+    and Codex's ``kind='git'`` for the same operator intent.
+    """
+
+    entry = _CodexMarketplaceEntry(
+        source="https://github.com/example-org/example.git",
+        source_type="git",
+        ref="main",
+    )
+    ctx = TranspileCtx()
+    neutral = _codex_marketplace_to_neutral("example", entry, ctx)
+    assert neutral is not None
+    assert neutral.source.kind == "github"
+    assert neutral.source.repo == "example-org/example"
+    assert neutral.source.url is None
+    assert neutral.source.ref == "main"
+
+
+def test_hand_authored_github_ssh_url_canonicalizes_to_kind_github() -> None:
+    """SSH ``git@github.com:owner/name.git`` form canonicalizes too —
+    same canonical owner/name, different transport."""
+
+    entry = _CodexMarketplaceEntry(
+        source="git@github.com:example-org/example.git",
+        source_type="git",
+    )
+    ctx = TranspileCtx()
+    neutral = _codex_marketplace_to_neutral("example", entry, ctx)
+    assert neutral is not None
+    assert neutral.source.kind == "github"
+    assert neutral.source.repo == "example-org/example"
+
+
+def test_hand_authored_custom_ssh_alias_stays_kind_git() -> None:
+    """``git@github-org:...`` is a custom SSH alias, not literally
+    ``github.com`` — chameleon can't rewrite it without changing auth
+    behaviour, so it stays ``kind='git'``."""
+
+    entry = _CodexMarketplaceEntry(
+        source="git@github-org:example-org/example.git",
+        source_type="git",
+    )
+    ctx = TranspileCtx()
+    neutral = _codex_marketplace_to_neutral("example", entry, ctx)
+    assert neutral is not None
+    assert neutral.source.kind == "git"
+    assert neutral.source.url == "git@github-org:example-org/example.git"
+
+
 def test_hand_authored_local_entry_decodes_to_kind_local() -> None:
     entry = _CodexMarketplaceEntry(source="/srv/vendored", source_type="local")
     ctx = TranspileCtx()
