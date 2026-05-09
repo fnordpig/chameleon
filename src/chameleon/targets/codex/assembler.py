@@ -10,13 +10,14 @@ V0 owns:
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
+from collections.abc import Mapping as ABCCMapping
 from typing import ClassVar, cast
 
 import tomlkit
 from pydantic import BaseModel
 
 from chameleon._types import FileFormat, FileOwnership, FileSpec, TargetId
-from chameleon.codecs._protocol import TranspileCtx
+from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.codecs.codex import CodexConfig
 from chameleon.codecs.codex.authorization import CodexAuthorizationSection
 from chameleon.codecs.codex.capabilities import CodexCapabilitiesSection
@@ -57,6 +58,68 @@ class CodexAssembler:
     )
 
     full_model: ClassVar[type[BaseModel]] = CodexConfig
+
+    @staticmethod
+    def _disassemble_config_toml(
+        raw: bytes,
+        *,
+        ctx: TranspileCtx | None,
+    ) -> dict[str, object]:
+        """Parse Codex config TOML with graceful failure to warnings.
+
+        The only failure mode is invalid TOML. In that case we emit a
+        typed LossWarning and continue with an empty document so merge
+        can keep moving (prefering a noisy migration note over a hard
+        crash).
+        """
+        source = raw.decode("utf-8") if raw else ""
+        if not source.strip():
+            return {}
+        try:
+            doc = load_toml(source)
+            return dict(doc)
+        except Exception as exc:  # pragma: no cover - defensive parse-failure path
+            if ctx is not None:
+                ctx.warn(
+                    LossWarning(
+                        domain=Domains.GOVERNANCE,
+                        target=BUILTIN_CODEX,
+                        message=(
+                            "could not disassemble config.toml; parse failure — fallback "
+                            "to default decode path. Please migrate this file to valid TOML. "
+                            f"cause={exc}"
+                        ),
+                    )
+                )
+            return {}
+
+    @staticmethod
+    def _sanitize_features(features: object) -> dict[str, object] | None:
+        """Return a canonicalized features map for emission.
+
+        ``codex_hooks`` is deprecated in current Codex versions and must not
+        be written to ``config.toml``. If both legacy and canonical keys are
+        present, canonical ``hooks`` wins.
+        """
+        if not isinstance(features, ABCCMapping):
+            return None
+        # tomlkit allows dotted-key style and mixed-type maps; normalize only
+        # straightforward string-keyed string/bool tables.
+        if not all(isinstance(k, str) for k in features):
+            return None
+
+        normalized: dict[str, object] = {}
+        for key, value in features.items():
+            normalized_key = cast("str", key)
+            normalized[normalized_key] = value
+
+        if "codex_hooks" in normalized:
+            canonical = normalized["codex_hooks"]
+            if "hooks" not in normalized:
+                normalized["hooks"] = canonical
+            normalized.pop("codex_hooks")
+
+        return normalized
 
     @staticmethod
     def assemble(  # noqa: PLR0912, PLR0915 — fans out across 8 domains by design
@@ -173,7 +236,8 @@ class CodexAssembler:
         if isinstance(governance, CodexGovernanceSection):
             if governance.features:
                 features_table = tomlkit.table()
-                for k, v in governance.features.items():
+                normalized_features = CodexAssembler._sanitize_features(governance.features) or {}
+                for k, v in normalized_features.items():
                     features_table[k] = v
                 doc["features"] = features_table
             if governance.projects:
@@ -187,6 +251,11 @@ class CodexAssembler:
 
         # Pass-through: top-level Codex keys we don't claim (e.g. personality).
         for k, v in passthrough.items():
+            if k == "features":
+                sanitized = CodexAssembler._sanitize_features(v)
+                if sanitized is not None:
+                    doc[k] = sanitized
+                    continue
             if k not in doc:
                 doc[k] = v
 
@@ -258,8 +327,7 @@ class CodexAssembler:
         passthrough: dict[str, object] = {}
 
         raw = files.get(CodexAssembler.CONFIG_TOML, b"")
-        doc = load_toml(raw.decode("utf-8")) if raw else {}
-        as_dict = dict(doc)
+        as_dict = CodexAssembler._disassemble_config_toml(raw, ctx=ctx)
 
         identity_keys = {
             "model",
