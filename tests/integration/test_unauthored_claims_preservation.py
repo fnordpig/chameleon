@@ -21,6 +21,7 @@ data, because that's the dominant case in real operator setups.
 
 from __future__ import annotations
 
+import json
 import shutil
 from pathlib import Path
 
@@ -155,6 +156,15 @@ def test_unauthored_claude_plugins_marketplaces_permissions_survive_merge(
     assert pre_enabled_plugins, "fixture pre-condition"
     assert pre_marketplaces, "fixture pre-condition"
     assert pre_permissions, "fixture pre-condition"
+    cache_path = tmp_path / "installed_plugins.json"
+    cache_path.write_text(
+        json.dumps({key: {} for key in pre_enabled_plugins}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "chameleon.codecs.claude.capabilities._CLAUDE_INSTALLED_PLUGINS_PATH",
+        cache_path,
+    )
 
     assert cli.main(["init"]) == 0
 

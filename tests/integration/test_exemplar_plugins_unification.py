@@ -14,7 +14,10 @@ silent loss.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+
+import pytest
 
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.claude.capabilities import (
@@ -37,13 +40,27 @@ from chameleon.schema.capabilities import (
 FIXTURE_HOME = Path(__file__).parent.parent / "fixtures" / "exemplar" / "home"
 
 
-def _claude_plugins_neutral() -> dict[str, PluginEntry]:
+def _claude_plugins_neutral(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> dict[str, PluginEntry]:
     raw = (FIXTURE_HOME / "_claude" / "settings.json").read_bytes()
     settings = load_json(raw) or {}
     assert isinstance(settings, dict)
+
+    enabled_plugins = dict(settings.get("enabledPlugins", {}) or {})
+    cache_path = tmp_path / "installed_plugins.json"
+    cache_path.write_text(
+        json.dumps({key: {} for key in enabled_plugins}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "chameleon.codecs.claude.capabilities._CLAUDE_INSTALLED_PLUGINS_PATH",
+        cache_path,
+    )
+
     section = ClaudeCapabilitiesSection.model_validate(
         {
-            "enabledPlugins": settings.get("enabledPlugins", {}),
+            "enabledPlugins": enabled_plugins,
             "extraKnownMarketplaces": settings.get("extraKnownMarketplaces", {}),
         }
     )
@@ -62,8 +79,10 @@ def _codex_plugins_neutral() -> dict[str, PluginEntry]:
     return CodexCapabilitiesCodec.from_target(section, TranspileCtx()).plugins
 
 
-def test_exemplar_disassembles_plugins_from_both_targets() -> None:
-    claude_plugins = _claude_plugins_neutral()
+def test_exemplar_disassembles_plugins_from_both_targets(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    claude_plugins = _claude_plugins_neutral(monkeypatch, tmp_path)
     codex_plugins = _codex_plugins_neutral()
 
     # Sanity: the exemplar carries plugin tables on both sides.
@@ -77,7 +96,9 @@ def test_exemplar_disassembles_plugins_from_both_targets() -> None:
     assert "plannotator@plannotator" in in_both
 
 
-def test_cross_target_conflict_rule_surfaces_disagreements() -> None:
+def test_cross_target_conflict_rule_surfaces_disagreements(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """Documented resolution rule: when targets disagree on a plugin's
     ``enabled`` value, ``reconcile_plugins`` returns a permissive union AND
     a ``PluginDisagreement`` record per offending key.
@@ -89,7 +110,7 @@ def test_cross_target_conflict_rule_surfaces_disagreements() -> None:
     with different ``enabled`` values, exactly one disagreement.
     """
 
-    claude_plugins = _claude_plugins_neutral()
+    claude_plugins = _claude_plugins_neutral(monkeypatch, tmp_path)
     codex_plugins = _codex_plugins_neutral()
 
     union, disagreements = reconcile_plugins(

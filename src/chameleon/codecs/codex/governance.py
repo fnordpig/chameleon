@@ -29,6 +29,37 @@ class CodexGovernanceSection(BaseModel):
     projects: dict[str, _CodexProject] = Field(default_factory=dict)
 
 
+def _normalize_codex_features(
+    input_features: dict[str, bool], ctx: TranspileCtx
+) -> dict[str, bool]:
+    """Normalize deprecated Codex feature aliases.
+
+    ``codex_hooks`` is deprecated in recent Codex versions; map it to the
+    canonical ``hooks`` key to keep emitted config warning-free.
+    """
+    if "codex_hooks" not in input_features:
+        return dict(input_features)
+
+    # Copy the live map first so we can apply canonical key migration.
+    features = dict(input_features)
+    canonical_value = features.pop("codex_hooks")
+    if "hooks" in features and features["hooks"] != canonical_value:
+        ctx.warn(
+            LossWarning(
+                domain=Domains.GOVERNANCE,
+                target=BUILTIN_CODEX,
+                message=(
+                    "governance.features contains both 'hooks' and "
+                    "'codex_hooks' with conflicting values; using 'hooks'"
+                ),
+                field_path=FieldPath(segments=("features",)),
+            )
+        )
+    else:
+        features["hooks"] = canonical_value
+    return features
+
+
 class CodexGovernanceCodec:
     target: ClassVar[TargetId] = BUILTIN_CODEX
     domain: ClassVar[Domains] = Domains.GOVERNANCE
@@ -44,7 +75,7 @@ class CodexGovernanceCodec:
     def to_target(model: Governance, ctx: TranspileCtx) -> CodexGovernanceSection:
         section = CodexGovernanceSection()
         if model.features:
-            section.features = dict(model.features)
+            section.features = _normalize_codex_features(model.features, ctx)
 
         # Detect duplicate paths within either list. The wire shape
         # (``projects.<path>.trust_level`` keyed by path string) cannot
@@ -113,6 +144,24 @@ class CodexGovernanceCodec:
     @staticmethod
     def from_target(section: CodexGovernanceSection, ctx: TranspileCtx) -> Governance:
         trust = Trust()
+        features = dict(section.features)
+        if "codex_hooks" in section.features and "hooks" not in section.features:
+            features["hooks"] = section.features["codex_hooks"]
+        elif "codex_hooks" in section.features and section.features.get(
+            "codex_hooks"
+        ) != section.features.get("hooks"):
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.GOVERNANCE,
+                    target=BUILTIN_CODEX,
+                    message=(
+                        "disagreement between Codex features 'hooks' and "
+                        "deprecated 'codex_hooks'; canonicalizing as 'hooks'"
+                    ),
+                    field_path=FieldPath(segments=("features",)),
+                )
+            )
+        features.pop("codex_hooks", None)
         for path, project in section.projects.items():
             if project.trust_level == "trusted":
                 trust.trusted_paths.append(path)
@@ -128,7 +177,7 @@ class CodexGovernanceCodec:
                         ),
                     )
                 )
-        return Governance(features=dict(section.features), trust=trust)
+        return Governance(features=features, trust=trust)
 
 
 __all__ = ["CodexGovernanceCodec", "CodexGovernanceSection"]

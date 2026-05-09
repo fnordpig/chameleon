@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.5.3] — 2026-05-09
+
+Fixes from issue triage around plugin compatibility and Codex feature
+compatibility.
+
+### Fixed
+
+- **Claude plugins are now runtime-vetted before write.** Entries in
+  `capabilities.plugins` now drop on write (or reverse-load) when they
+  reference a marketplace not declared in `plugin_marketplaces`/built-ins or
+  when they are not present in the local Claude `installed_plugins.json`
+  cache. This removes stale Codex-only plugin keys from Claude `enabledPlugins`
+  and prevents startup failures like `Plugin foo@bar is not cached at (not
+  recorded)`.
+
+- **Codex deprecated `codex_hooks` feature normalized to `hooks`.**
+  When emitting Codex config, `codex_hooks` is migrated to canonical `hooks`
+  automatically; when reading, the deprecated key is mapped back to
+  `features.hooks` to keep startup and schema writes warning-free.
+
 ## [0.5.2] — 2026-05-07
 
 Two operator-visible bug fixes for plugin-loading errors observed after

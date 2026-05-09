@@ -9,7 +9,7 @@ from chameleon.codecs.claude.governance import ClaudeGovernanceCodec
 from chameleon.codecs.claude.interface import ClaudeInterfaceCodec
 from chameleon.codecs.claude.lifecycle import ClaudeLifecycleCodec
 from chameleon.codecs.codex.authorization import CodexAuthorizationCodec
-from chameleon.codecs.codex.governance import CodexGovernanceCodec
+from chameleon.codecs.codex.governance import CodexGovernanceCodec, CodexGovernanceSection
 from chameleon.codecs.codex.interface import CodexInterfaceCodec
 from chameleon.codecs.codex.lifecycle import CodexLifecycleCodec
 from chameleon.schema.authorization import Authorization, PermissionMode, SandboxMode
@@ -130,6 +130,21 @@ def test_codex_governance_round_trip_features_trust() -> None:
     assert restored.features == {"shell_tool": True, "fast_mode": True}
     assert restored.trust.trusted_paths == ["/repo/foo"]
     assert restored.trust.untrusted_paths == ["/tmp/sketchy"]
+
+
+def test_codex_governance_canonicalizes_codex_hooks_to_hooks() -> None:
+    orig = Governance(features={"codex_hooks": True})
+    ctx = TranspileCtx()
+    section = CodexGovernanceCodec.to_target(orig, ctx)
+    assert section.features.get("hooks") is True
+    assert "codex_hooks" not in section.features
+    assert ctx.warnings == []
+
+
+def test_codex_governance_canonicalizes_codex_hooks_back_to_features() -> None:
+    section = CodexGovernanceSection(features={"codex_hooks": True}, projects={})
+    restored = CodexGovernanceCodec.from_target(section, TranspileCtx())
+    assert restored.features == {"hooks": True}
 
 
 # ---- Trust canonicalisation ( D-IDEM regression) ---------------------

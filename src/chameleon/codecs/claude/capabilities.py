@@ -9,6 +9,8 @@ assembler is what splits across files.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Annotated, ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -133,6 +135,7 @@ _CLAUDE_BUILTIN_MARKETPLACES: frozenset[str] = frozenset(
         "anthropic-agent-skills",
     }
 )
+_CLAUDE_INSTALLED_PLUGINS_PATH = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
 
 
 class _ClaudeMarketplace(BaseModel):
@@ -233,26 +236,37 @@ class ClaudeCapabilitiesCodec:
         known_marketplaces: frozenset[str] = (
             frozenset(model.plugin_marketplaces) | _CLAUDE_BUILTIN_MARKETPLACES
         )
-        dropped: list[tuple[str, str]] = []  # (plugin_key, marketplace_id-or-empty)
+        cached_plugins = _load_claude_installed_plugin_keys(_CLAUDE_INSTALLED_PLUGINS_PATH)
+        dropped: list[tuple[str, str, str]] = []  # (plugin_key, marketplace_id-or-empty, reason)
         for plugin_key in sorted(model.plugins):
             mp_id = plugin_key.rsplit("@", 1)[1] if "@" in plugin_key else ""
             if mp_id and mp_id in known_marketplaces:
+                if (
+                    mp_id not in _CLAUDE_BUILTIN_MARKETPLACES
+                    and cached_plugins is not None
+                    and plugin_key not in cached_plugins
+                ):
+                    dropped.append((plugin_key, mp_id, "not cached"))
+                    continue
                 section.enabled_plugins[plugin_key] = model.plugins[plugin_key].enabled
             else:
-                dropped.append((plugin_key, mp_id))
+                dropped.append((plugin_key, mp_id, "marketplace not declared"))
         if dropped:
             dropped_summary = ", ".join(
-                f"{k!r} (marketplace={m!r})" if m else f"{k!r} (no @marketplace)"
-                for k, m in dropped
+                (
+                    f"{k!r} (marketplace={m!r}, reason={reason!r})"
+                    if m
+                    else f"{k!r} (no @marketplace)"
+                )
+                for k, m, reason in dropped
             )
             ctx.warn(
                 LossWarning(
                     domain=Domains.CAPABILITIES,
                     target=BUILTIN_CLAUDE,
                     message=(
-                        "dropping plugins from enabledPlugins because their "
-                        "marketplace is neither declared in extraKnownMarketplaces "
-                        "nor a Claude built-in: "
+                        "dropping enabledPlugins entries from source because they "
+                        "are not supported in this environment: "
                         f"{dropped_summary}"
                     ),
                     field_path=FieldPath(segments=("enabledPlugins",)),
@@ -298,10 +312,53 @@ class ClaudeCapabilitiesCodec:
                         field_path=FieldPath(segments=("mcpServers",)),
                     )
                 )
-        plugins: dict[str, PluginEntry] = {
-            key: PluginEntry(enabled=section.enabled_plugins[key])
-            for key in sorted(section.enabled_plugins)
-        }
+        # On disassembly, mirror the runtime-compatibility filter used at
+        # assemble time: only load plugin entries whose marketplace is
+        # either a known Claude builtin or explicitly declared in
+        # extraKnownMarketplaces. This keeps typos (for example
+        # ``archiuvium-plugin-creator@my-claude-plugins``) from being
+        # reintroduced into neutral, which would get re-emitted as
+        # runtime errors on the next compile unless manually cleaned.
+        known_marketplaces = (
+            frozenset(section.extra_known_marketplaces) | _CLAUDE_BUILTIN_MARKETPLACES
+        )
+        cached_plugins = _load_claude_installed_plugin_keys(_CLAUDE_INSTALLED_PLUGINS_PATH)
+        dropped: list[tuple[str, str, str]] = []  # (plugin_key, marketplace_id-or-empty, reason)
+        plugins: dict[str, PluginEntry] = {}
+        for key in sorted(section.enabled_plugins):
+            mp_id = key.rsplit("@", 1)[1] if "@" in key else ""
+            if mp_id and mp_id in known_marketplaces:
+                if (
+                    mp_id not in _CLAUDE_BUILTIN_MARKETPLACES
+                    and cached_plugins is not None
+                    and key not in cached_plugins
+                ):
+                    dropped.append((key, mp_id, "not cached"))
+                    continue
+                plugins[key] = PluginEntry(enabled=section.enabled_plugins[key])
+            else:
+                dropped.append((key, mp_id, "marketplace not declared"))
+        if dropped:
+            dropped_summary = ", ".join(
+                (
+                    f"{k!r} (marketplace={m!r}, reason={reason!r})"
+                    if m
+                    else f"{k!r} (no @marketplace)"
+                )
+                for k, m, reason in dropped
+            )
+            ctx.warn(
+                LossWarning(
+                    domain=Domains.CAPABILITIES,
+                    target=BUILTIN_CLAUDE,
+                    message=(
+                        "dropping enabledPlugins entries from source because they "
+                        "are not supported in this environment: "
+                        f"{dropped_summary}"
+                    ),
+                    field_path=FieldPath(segments=("enabledPlugins",)),
+                )
+            )
         marketplaces: dict[str, PluginMarketplace] = {}
         for mp_name in sorted(section.extra_known_marketplaces):
             mp = section.extra_known_marketplaces[mp_name]
@@ -313,6 +370,21 @@ class ClaudeCapabilitiesCodec:
             plugins=plugins,
             plugin_marketplaces=marketplaces,
         )
+
+
+def _load_claude_installed_plugin_keys(path: Path) -> set[str] | None:
+    try:
+        if not path.exists():
+            return None
+    except OSError:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return {k for k in data if isinstance(k, str)}
 
 
 def _claude_marketplace_from_neutral(mp: PluginMarketplace) -> _ClaudeMarketplace:
