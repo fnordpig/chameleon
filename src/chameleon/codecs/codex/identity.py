@@ -28,12 +28,12 @@ each field exactly (subject to the int/str types declared on the section).
 
 from __future__ import annotations
 
-import os
 from typing import ClassVar
 
 from pydantic import BaseModel, ConfigDict
 
 from chameleon._types import FieldPath, TargetId
+from chameleon.codecs._path_policy import collapse_user_home, expand_user_home
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.codecs.codex._generated import ForcedLoginMethod
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
@@ -52,18 +52,6 @@ _CODEX_TO_AUTH_METHOD: dict[ForcedLoginMethod, AuthMethod] = {
     ForcedLoginMethod.chatgpt: AuthMethod.OAUTH,
     ForcedLoginMethod.api: AuthMethod.API_KEY,
 }
-
-
-def _collapse_user_home(path: str) -> str:
-    """Serialize local-home paths portably in neutral YAML."""
-    home = os.path.normpath(os.path.expanduser("~"))
-    normalized = os.path.normpath(path)
-    if normalized == home:
-        return "~"
-    home_prefix = f"{home}{os.sep}"
-    if normalized.startswith(home_prefix):
-        return f"~/{normalized.removeprefix(home_prefix)}"
-    return path
 
 
 class CodexIdentitySection(BaseModel):
@@ -146,7 +134,7 @@ class CodexIdentityCodec:
         if model.compact_threshold is not None:
             section.model_auto_compact_token_limit = model.compact_threshold
         if model.model_catalog_path is not None:
-            section.model_catalog_json = os.path.expanduser(model.model_catalog_path)
+            section.model_catalog_json = expand_user_home(model.model_catalog_path)
         # auth.method ↔ forced_login_method.
         if model.auth.method is not None:
             mapped = _AUTH_METHOD_TO_CODEX.get(model.auth.method)
@@ -192,7 +180,7 @@ class CodexIdentityCodec:
         if section.model_auto_compact_token_limit is not None:
             ident.compact_threshold = section.model_auto_compact_token_limit
         if section.model_catalog_json is not None:
-            ident.model_catalog_path = _collapse_user_home(section.model_catalog_json)
+            ident.model_catalog_path = collapse_user_home(section.model_catalog_json)
         # reverse mapping for forced_login_method.
         if section.forced_login_method is not None:
             try:

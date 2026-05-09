@@ -12,6 +12,7 @@ from typing import ClassVar, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
+from chameleon.codecs._path_policy import collapse_user_home, expand_user_home
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.codecs._url import parse_github_url
 from chameleon.codecs.codex._generated import WebSearchMode
@@ -168,7 +169,7 @@ class CodexCapabilitiesCodec:
                     command=server.command,
                     args=list(server.args),
                     env=dict(server.env),
-                    cwd=server.cwd,
+                    cwd=expand_user_home(server.cwd) if server.cwd is not None else None,
                 )
             elif isinstance(server, McpServerStreamableHttp):
                 section.mcp_servers[name] = _CodexMcpServerHttp(
@@ -204,7 +205,7 @@ class CodexCapabilitiesCodec:
                     command=raw.command,
                     args=list(raw.args),
                     env=dict(raw.env),
-                    cwd=raw.cwd,
+                    cwd=collapse_user_home(raw.cwd) if raw.cwd is not None else None,
                 )
             elif isinstance(raw, _CodexMcpServerHttp):
                 servers[name] = McpServerStreamableHttp.model_validate(
@@ -276,7 +277,7 @@ def _codex_marketplace_from_neutral(
             msg = f"marketplace {name!r}: PluginMarketplaceSource(kind='git') requires url"
             raise ValueError(msg)
         return _CodexMarketplaceEntry(
-            source=src.url,
+            source=expand_user_home(src.url),
             source_type="git",
             ref=src.ref,
             auto_update=auto_update,
@@ -290,7 +291,7 @@ def _codex_marketplace_from_neutral(
         # tag ``chameleon_kind='url'`` so the next ``from_target`` recovers
         # ``kind='url'`` rather than collapsing to ``'git'`` (F-MP-U).
         return _CodexMarketplaceEntry(
-            source=src.url,
+            source=expand_user_home(src.url),
             source_type=None,
             auto_update=auto_update,
             chameleon_kind="url",
@@ -300,7 +301,7 @@ def _codex_marketplace_from_neutral(
             msg = f"marketplace {name!r}: PluginMarketplaceSource(kind='local') requires path"
             raise ValueError(msg)
         return _CodexMarketplaceEntry(
-            source=src.path,
+            source=expand_user_home(src.path),
             source_type="local",
             auto_update=auto_update,
         )
@@ -348,7 +349,7 @@ def _codex_marketplace_to_neutral(
     elif entry.chameleon_kind == "url":
         neutral_src = PluginMarketplaceSource(kind="url", url=entry.source)
     elif entry.source_type == "local":
-        neutral_src = PluginMarketplaceSource(kind="local", path=entry.source)
+        neutral_src = PluginMarketplaceSource(kind="local", path=collapse_user_home(entry.source))
     else:
         # source_type == "git" or unset. Canonicalize hand-authored github
         # URLs (no chameleon_kind hint) to ``kind='github'`` so neutral

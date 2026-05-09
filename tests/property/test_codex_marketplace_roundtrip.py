@@ -221,6 +221,62 @@ def test_url_kind_emits_chameleon_kind_hint_and_no_source_type() -> None:
     assert entry.chameleon_repo is None
 
 
+def test_local_kind_expands_user_home_to_absolute_path_on_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A home-relative local marketplace path becomes absolute for the Codex
+    target while preserving ``kind='local'`` semantics."""
+    monkeypatch.setenv("HOME", "/Users/exampleuser")
+    ctx = TranspileCtx()
+    entry = _codex_marketplace_from_neutral(
+        "vendored",
+        PluginMarketplace(
+            source=PluginMarketplaceSource(kind="local", path="~/.codex/marketplaces"),
+            auto_update=True,
+        ),
+        ctx,
+    )
+    assert entry.source == "/Users/exampleuser/.codex/marketplaces"
+    assert entry.source_type == "local"
+
+    neutral = _codex_marketplace_to_neutral("vendored", entry, ctx)
+    assert neutral is not None
+    assert neutral.source.kind == "local"
+    assert neutral.source.path == "~/.codex/marketplaces"
+
+
+def test_url_kind_expands_user_home_on_target_when_present() -> None:
+    """Paths that are not a leading ``~`` are left untouched by path expansion."""
+    ctx = TranspileCtx()
+    entry = _codex_marketplace_from_neutral(
+        "raw-url",
+        PluginMarketplace(
+            source=PluginMarketplaceSource(
+                kind="url",
+                url="file://~/.codex/marketplaces/index.json",
+            ),
+        ),
+        ctx,
+    )
+    assert entry.source == "file://~/.codex/marketplaces/index.json"
+
+
+def test_hand_authored_local_entry_with_absolute_home_collapses_back_to_tilde(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An absolute home path decoded from a Codex target is normalized back to
+    ``~`` in neutral during ``from_target``."""
+    monkeypatch.setenv("HOME", "/Users/exampleuser")
+    ctx = TranspileCtx()
+    entry = _CodexMarketplaceEntry(
+        source="/Users/exampleuser/.codex/marketplaces", source_type="local"
+    )
+    neutral = _codex_marketplace_to_neutral("vendored", entry, ctx)
+    assert neutral is not None
+    assert neutral.source.kind == "local"
+    assert neutral.source.path == "~/.codex/marketplaces"
+
+
 def test_git_kind_emits_no_chameleon_hints() -> None:
     """Pin: a plain ``kind='git'`` round-trips through ``source_type='git'``
     alone with NO chameleon-namespaced hints. Operators authoring

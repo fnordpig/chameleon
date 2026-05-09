@@ -21,6 +21,8 @@ refactor cannot accidentally degrade them back to silent collapse.
 
 from __future__ import annotations
 
+import pytest
+
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.codecs.codex.governance import CodexGovernanceCodec
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
@@ -157,3 +159,26 @@ def test_duplicates_across_both_lists_only_warns_once_per_category() -> None:
     assert "/srv/a" in dup[0].message
     assert "/srv/b" in dup[0].message
     assert "/srv/c" in dup[0].message
+
+
+def test_trust_paths_expand_on_encode_and_collapse_on_decode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Trust lists with ``~`` use the local home on the target and return to
+    ``~`` on neutral round-trip."""
+    monkeypatch.setenv("HOME", "/Users/exampleuser")
+
+    model = Governance.model_construct(
+        trust=Trust.model_construct(
+            trusted_paths=["~/.cache", "/tmp/confidential"],
+            untrusted_paths=[],
+        )
+    )
+    ctx = TranspileCtx()
+    section = CodexGovernanceCodec.to_target(model, ctx)
+    assert section.projects["/Users/exampleuser/.cache"].trust_level == "trusted"
+    assert section.projects["/tmp/confidential"].trust_level == "trusted"
+
+    restored = CodexGovernanceCodec.from_target(section, ctx)
+    assert "~/.cache" in restored.trust.trusted_paths
+    assert "/tmp/confidential" in restored.trust.trusted_paths

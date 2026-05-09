@@ -13,6 +13,7 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict, Field
 
 from chameleon._types import FieldPath, TargetId
+from chameleon.codecs._path_policy import collapse_user_home, expand_user_home
 from chameleon.codecs._protocol import LossWarning, TranspileCtx
 from chameleon.schema._constants import BUILTIN_CODEX, Domains
 from chameleon.schema.governance import Governance, Trust
@@ -124,10 +125,12 @@ class CodexGovernanceCodec:
                 )
             )
 
-        for path in model.trust.trusted_paths:
-            section.projects[path] = _CodexProject(trust_level="trusted")
-        for path in model.trust.untrusted_paths:
-            section.projects[path] = _CodexProject(trust_level="untrusted")
+        for trust_path in model.trust.trusted_paths:
+            normalized_path = expand_user_home(trust_path)
+            section.projects[normalized_path] = _CodexProject(trust_level="trusted")
+        for trust_path in model.trust.untrusted_paths:
+            normalized_path = expand_user_home(trust_path)
+            section.projects[normalized_path] = _CodexProject(trust_level="untrusted")
         if model.updates.channel is not None or model.updates.minimum_version is not None:
             ctx.warn(
                 LossWarning(
@@ -163,10 +166,11 @@ class CodexGovernanceCodec:
             )
         features.pop("codex_hooks", None)
         for path, project in section.projects.items():
+            normalized_path = collapse_user_home(path)
             if project.trust_level == "trusted":
-                trust.trusted_paths.append(path)
+                trust.trusted_paths.append(normalized_path)
             elif project.trust_level == "untrusted":
-                trust.untrusted_paths.append(path)
+                trust.untrusted_paths.append(normalized_path)
             else:
                 ctx.warn(
                     LossWarning(

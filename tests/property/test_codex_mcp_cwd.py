@@ -19,6 +19,8 @@ companion regression).
 
 from __future__ import annotations
 
+import pytest
+
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex.capabilities import (
     CodexCapabilitiesCodec,
@@ -79,6 +81,58 @@ def test_codex_mcp_stdio_cwd_absent_round_trips() -> None:
     assert isinstance(server, McpServerStdio)
     assert server.cwd is None
     assert list(ctx.warnings) == []
+
+
+def test_codex_mcp_stdio_cwd_home_shortcut_round_trips() -> None:
+    """A home-relative ``cwd`` (``~/...``) is expanded on encode and
+    collapsed back on decode."""
+    ctx = TranspileCtx()
+    section = CodexCapabilitiesSection.model_validate(
+        {
+            "mcp_servers": {
+                "memory": {
+                    "command": "npx",
+                    "args": ["-y", "@modelcontextprotocol/server-memory"],
+                    "env": {},
+                    "cwd": "~/.cache/codemcp",
+                }
+            }
+        }
+    )
+    restored = CodexCapabilitiesCodec.from_target(section, ctx)
+    assert isinstance(restored.mcp_servers["memory"], McpServerStdio)
+    assert restored.mcp_servers["memory"].cwd == "~/.cache/codemcp"
+
+    section = CodexCapabilitiesCodec.to_target(restored, ctx)
+    assert isinstance(section.mcp_servers["memory"], _CodexMcpServerStdio)
+    assert section.mcp_servers["memory"].cwd is not None
+    assert section.mcp_servers["memory"].cwd.endswith("/.cache/codemcp")
+    assert section.mcp_servers["memory"].cwd != "~/.cache/codemcp"
+
+
+def test_codex_mcp_stdio_cwd_home_shortcut_expands_deterministically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A home-relative shortcut expands to ``$HOME/...`` based on the current host."""
+    monkeypatch.setenv("HOME", "/Users/exampleuser")
+    model = Capabilities(
+        mcp_servers={
+            "memory": McpServerStdio(
+                command="npx",
+                args=["-y", "@modelcontextprotocol/server-memory"],
+                env={},
+                cwd="~/.cache/codemcp",
+            ),
+        }
+    )
+    ctx = TranspileCtx()
+    section = CodexCapabilitiesCodec.to_target(model, ctx)
+    assert isinstance(section.mcp_servers["memory"], _CodexMcpServerStdio)
+    assert section.mcp_servers["memory"].cwd == "/Users/exampleuser/.cache/codemcp"
+
+    restored = CodexCapabilitiesCodec.from_target(section, ctx)
+    assert isinstance(restored.mcp_servers["memory"], McpServerStdio)
+    assert restored.mcp_servers["memory"].cwd == "~/.cache/codemcp"
 
 
 def test_codex_mcp_stdio_cwd_decodes_from_on_disk() -> None:

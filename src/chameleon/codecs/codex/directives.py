@@ -17,6 +17,7 @@ from typing import ClassVar
 from pydantic import BaseModel, ConfigDict
 
 from chameleon._types import FieldPath, TargetId
+from chameleon.codecs._path_policy import collapse_user_home, expand_user_home
 from chameleon.codecs._protocol import TranspileCtx
 from chameleon.codecs.codex._generated import Personality as CodexPersonality
 from chameleon.codecs.codex._generated import Verbosity as CodexVerbosity
@@ -60,7 +61,11 @@ class CodexDirectivesCodec:
             CodexVerbosity(model.verbosity.value) if model.verbosity is not None else None
         )
         return CodexDirectivesSection(
-            model_instructions_file=model.system_prompt_file,
+            model_instructions_file=(
+                expand_user_home(model.system_prompt_file)
+                if model.system_prompt_file is not None
+                else None
+            ),
             commit_attribution=model.commit_attribution,
             personality=codex_personality,
             model_verbosity=codex_verbosity,
@@ -77,7 +82,11 @@ class CodexDirectivesCodec:
             else None
         )
         return Directives(
-            system_prompt_file=section.model_instructions_file,
+            system_prompt_file=(
+                collapse_user_home(section.model_instructions_file)
+                if section.model_instructions_file is not None
+                else None
+            ),
             commit_attribution=section.commit_attribution,
             personality=neutral_personality,
             verbosity=neutral_verbosity,
