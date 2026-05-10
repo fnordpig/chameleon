@@ -173,7 +173,10 @@ class CodexAssembler:
         environment = per_domain.get(Domains.ENVIRONMENT)
         if isinstance(environment, CodexEnvironmentSection):
             sep = tomlkit.table()
-            sep["set"] = environment.shell_environment_policy.set
+            set_table = tomlkit.table()
+            for k, v in environment.shell_environment_policy.set.items():
+                set_table[k] = v
+            sep["set"] = set_table
             # emit ``inherit`` when the codec set it.
             if environment.shell_environment_policy.inherit is not None:
                 sep["inherit"] = environment.shell_environment_policy.inherit
