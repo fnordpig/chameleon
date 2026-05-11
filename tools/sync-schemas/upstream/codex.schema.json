@@ -128,7 +128,7 @@
       ]
     },
     "commit_attribution": {
-      "description": "Optional commit attribution text for commit message co-author trailers.\n\nSet to an empty string to disable automatic commit attribution.",
+      "description": "Optional commit attribution text for commit message co-author trailers. This top-level setting only takes effect when `[features].codex_git_commit` is enabled.\n\nWhen enabled and unset, Codex uses `Codex <noreply@openai.com>`. Set to an empty string to disable automatic commit attribution.",
       "type": [
         "string",
         "null"
@@ -237,13 +237,6 @@
         }
       ]
     },
-    "experimental_thread_store_endpoint": {
-      "description": "Experimental / do not use. When set, app-server uses a remote thread store at this endpoint instead of the local filesystem/SQLite store.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "experimental_use_freeform_apply_patch": {
       "type": [
         "boolean",
@@ -273,10 +266,16 @@
         "apps_mcp_path_override": {
           "$ref": "#/definitions/FeatureToml_for_AppsMcpPathOverrideConfigToml"
         },
+        "auth_elicitation": {
+          "type": "boolean"
+        },
         "browser_use": {
           "type": "boolean"
         },
         "browser_use_external": {
+          "type": "boolean"
+        },
+        "builtin_mcp": {
           "type": "boolean"
         },
         "child_agents_md": {
@@ -399,6 +398,9 @@
         "realtime_conversation": {
           "type": "boolean"
         },
+        "remote_compaction_v2": {
+          "type": "boolean"
+        },
         "remote_control": {
           "type": "boolean"
         },
@@ -415,6 +417,9 @@
           "type": "boolean"
         },
         "request_rule": {
+          "type": "boolean"
+        },
+        "responses_websocket_response_processed": {
           "type": "boolean"
         },
         "responses_websockets": {
@@ -796,7 +801,7 @@
       ]
     },
     "notify": {
-      "description": "Deprecated optional external command to spawn for end-user notifications.",
+      "description": "Optional external command to spawn for end-user notifications.",
       "default": null,
       "type": [
         "array",
@@ -970,14 +975,10 @@
       ]
     },
     "service_tier": {
-      "description": "Optional explicit service tier preference for new turns (`fast` or `flex`).",
-      "anyOf": [
-        {
-          "$ref": "#/definitions/ServiceTier"
-        },
-        {
-          "type": "null"
-        }
+      "description": "Optional explicit service tier request id for new turns (for example `priority` or `flex`; legacy `fast` also works).",
+      "type": [
+        "string",
+        "null"
       ]
     },
     "shell_environment_policy": {
@@ -1579,10 +1580,16 @@
             "apps_mcp_path_override": {
               "$ref": "#/definitions/FeatureToml_for_AppsMcpPathOverrideConfigToml"
             },
+            "auth_elicitation": {
+              "type": "boolean"
+            },
             "browser_use": {
               "type": "boolean"
             },
             "browser_use_external": {
+              "type": "boolean"
+            },
+            "builtin_mcp": {
               "type": "boolean"
             },
             "child_agents_md": {
@@ -1705,6 +1712,9 @@
             "realtime_conversation": {
               "type": "boolean"
             },
+            "remote_compaction_v2": {
+              "type": "boolean"
+            },
             "remote_control": {
               "type": "boolean"
             },
@@ -1721,6 +1731,9 @@
               "type": "boolean"
             },
             "request_rule": {
+              "type": "boolean"
+            },
+            "responses_websocket_response_processed": {
               "type": "boolean"
             },
             "responses_websockets": {
@@ -1936,14 +1949,10 @@
           ]
         },
         "service_tier": {
-          "description": "Optional explicit service tier preference for new turns (`fast` or `flex`).",
-          "anyOf": [
-            {
-              "$ref": "#/definitions/ServiceTier"
-            },
-            {
-              "type": "null"
-            }
+          "description": "Optional explicit service tier request id for new turns (for example `priority` or `flex`; legacy `fast` also works).",
+          "type": [
+            "string",
+            "null"
           ]
         },
         "tools": {
@@ -1960,6 +1969,18 @@
           "type": [
             "boolean",
             "null"
+          ]
+        },
+        "tui": {
+          "description": "TUI settings scoped to this profile.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ProfileTui"
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "web_search": {
@@ -2353,6 +2374,12 @@
             "boolean",
             "null"
           ]
+        },
+        "trusted_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     },
@@ -2366,7 +2393,21 @@
             "$ref": "#/definitions/MatcherGroup"
           }
         },
+        "PostCompact": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MatcherGroup"
+          }
+        },
         "PostToolUse": {
+          "default": [],
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MatcherGroup"
+          }
+        },
+        "PreCompact": {
           "default": [],
           "type": "array",
           "items": {
@@ -3220,6 +3261,16 @@
             }
           ]
         },
+        "span_attributes": {
+          "description": "Attributes to add to every exported trace span.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "trace_exporter": {
           "description": "Optional trace exporter",
           "anyOf": [
@@ -3230,6 +3281,19 @@
               "type": "null"
             }
           ]
+        },
+        "tracestate": {
+          "description": "Semicolon-separated `key:value` fields to upsert into W3C tracestate members.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          }
         }
       },
       "additionalProperties": false
@@ -3482,6 +3546,25 @@
           "additionalProperties": {
             "$ref": "#/definitions/McpServerToolConfig"
           }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ProfileTui": {
+      "description": "TUI settings supported inside a named profile.",
+      "type": "object",
+      "properties": {
+        "session_picker_view": {
+          "description": "Preferred layout for resume/fork session picker results.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionPickerViewMode"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false
@@ -3876,11 +3959,12 @@
       },
       "additionalProperties": false
     },
-    "ServiceTier": {
+    "SessionPickerViewMode": {
+      "description": "Preferred layout for the resume/fork session picker.",
       "type": "string",
       "enum": [
-        "fast",
-        "flex"
+        "comfortable",
+        "dense"
       ]
     },
     "ShellEnvironmentPolicyInherit": {
@@ -4040,24 +4124,6 @@
               ]
             }
           }
-        },
-        {
-          "type": "object",
-          "required": [
-            "endpoint",
-            "type"
-          ],
-          "properties": {
-            "endpoint": {
-              "type": "string"
-            },
-            "type": {
-              "type": "string",
-              "enum": [
-                "remote"
-              ]
-            }
-          }
         }
       ]
     },
@@ -4204,6 +4270,7 @@
               "insert_newline": null,
               "kill_line_end": null,
               "kill_line_start": null,
+              "kill_whole_line": null,
               "move_down": null,
               "move_left": null,
               "move_line_end": null,
@@ -4221,6 +4288,8 @@
               "open_transcript": null,
               "queue": null,
               "submit": null,
+              "toggle_fast_mode": null,
+              "toggle_raw_output": null,
               "toggle_shortcuts": null,
               "toggle_vim_mode": null
             },
@@ -4320,6 +4389,23 @@
           "allOf": [
             {
               "$ref": "#/definitions/Notifications"
+            }
+          ]
+        },
+        "raw_output_mode": {
+          "description": "Start the TUI in raw scrollback mode for copy-friendly transcript output. Defaults to `false`.",
+          "default": false,
+          "type": "boolean"
+        },
+        "session_picker_view": {
+          "description": "Preferred layout for resume/fork session picker results.",
+          "default": null,
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SessionPickerViewMode"
+            },
+            {
+              "type": "null"
             }
           ]
         },
@@ -4659,6 +4745,17 @@
             }
           ]
         },
+        "kill_whole_line": {
+          "description": "Kill the current line.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "move_down": {
           "description": "Move cursor down one visual line.",
           "anyOf": [
@@ -4831,6 +4928,28 @@
             }
           ]
         },
+        "toggle_fast_mode": {
+          "description": "Toggle Fast mode.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toggle_raw_output": {
+          "description": "Toggle raw scrollback mode for copy-friendly transcript selection.",
+          "anyOf": [
+            {
+              "$ref": "#/definitions/KeybindingsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "toggle_shortcuts": {
           "description": "Toggle the composer shortcut overlay.",
           "anyOf": [
@@ -4912,6 +5031,7 @@
             "insert_newline": null,
             "kill_line_end": null,
             "kill_line_start": null,
+            "kill_whole_line": null,
             "move_down": null,
             "move_left": null,
             "move_line_end": null,
@@ -4936,6 +5056,8 @@
             "open_transcript": null,
             "queue": null,
             "submit": null,
+            "toggle_fast_mode": null,
+            "toggle_raw_output": null,
             "toggle_shortcuts": null,
             "toggle_vim_mode": null
           },

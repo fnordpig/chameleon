@@ -6,7 +6,7 @@
 # schemastore.org's claude-code-settings.json is updated frequently.
 # Pin a specific commit SHA to make regeneration reproducible.
 source = "https://raw.githubusercontent.com/SchemaStore/schemastore/{git_sha}/src/schemas/json/claude-code-settings.json"
-git_sha = "d3cbd0bf40e8c45f8b88e87d3bc40fdbf9644500"
+git_sha = "3493194327c5513d99e618e913ce20d69938c3fb"
 vendored_at = "tools/sync-schemas/upstream/claude.schema.json"
 
 [codex]
@@ -15,7 +15,7 @@ vendored_at = "tools/sync-schemas/upstream/claude.schema.json"
 # tools/sync-schemas/codex/ depends on codex-rs as a git dependency at
 # this pin and dumps the schema for ConfigToml on stdout.
 git_url = "https://github.com/openai/codex.git"
-git_sha = "35aaa5d9fcb606fb6f27dd5747ecab3f4ba0c07e"
+git_sha = "2abdeb34d5b7a0bbdf082ce8be1d5dae6c645ffd"
 config_struct = "ConfigToml"
 config_crate_path = "codex-rs/config"
 vendored_at = "tools/sync-schemas/upstream/codex.schema.json"
