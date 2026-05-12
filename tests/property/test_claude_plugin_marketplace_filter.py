@@ -142,7 +142,10 @@ def test_claude_assemble_drops_plugins_not_cached_in_local_claude_install(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cache_path = tmp_path / "installed_plugins.json"
-    cache_path.write_text(json.dumps({"code-review@openai-curated": []}), encoding="utf-8")
+    cache_path.write_text(
+        json.dumps({"version": 2, "plugins": {"code-review@openai-curated": []}}),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         "chameleon.codecs.claude.capabilities._CLAUDE_INSTALLED_PLUGINS_PATH",
         cache_path,
@@ -177,7 +180,10 @@ def test_claude_disassemble_drops_plugins_not_cached_in_local_claude_install(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     cache_path = tmp_path / "installed_plugins.json"
-    cache_path.write_text(json.dumps({"code-review@openai-curated": []}), encoding="utf-8")
+    cache_path.write_text(
+        json.dumps({"version": 2, "plugins": {"code-review@openai-curated": []}}),
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
         "chameleon.codecs.claude.capabilities._CLAUDE_INSTALLED_PLUGINS_PATH",
         cache_path,
@@ -206,3 +212,31 @@ def test_claude_disassemble_drops_plugins_not_cached_in_local_claude_install(
     assert any(
         w.target == BUILTIN_CLAUDE and "bash-lsp@zircote-lsp" in w.message for w in ctx.warnings
     )
+
+
+def test_claude_cache_loader_accepts_legacy_top_level_shape(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Legacy top-level-key cache still works as fallback."""
+    cache_path = tmp_path / "installed_plugins.json"
+    cache_path.write_text(json.dumps({"code-review@openai-curated": []}), encoding="utf-8")
+    monkeypatch.setattr(
+        "chameleon.codecs.claude.capabilities._CLAUDE_INSTALLED_PLUGINS_PATH",
+        cache_path,
+    )
+    section = ClaudeCapabilitiesSection.model_validate(
+        {
+            "extraKnownMarketplaces": {
+                "openai-curated": {
+                    "source": {"source": "github", "repo": "openai-curated/repo"},
+                },
+            },
+            "enabledPlugins": {
+                "code-review@openai-curated": True,
+            },
+        }
+    )
+    ctx = TranspileCtx()
+    model = ClaudeCapabilitiesCodec.from_target(section, ctx)
+
+    assert "code-review@openai-curated" in model.plugins

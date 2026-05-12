@@ -384,6 +384,15 @@ def _load_claude_installed_plugin_keys(path: Path) -> set[str] | None:
         return None
     if not isinstance(data, dict):
         return None
+    # Modern Claude shape:
+    # {
+    #   "version": <int>,
+    #   "plugins": { "<plugin>@<marketplace>": [ ...metadata... ], ... }
+    # }
+    plugins_obj = data.get("plugins")
+    if isinstance(plugins_obj, dict):
+        return {k for k in plugins_obj if isinstance(k, str)}
+    # Legacy/fallback shape: treat top-level mapping keys as plugin IDs.
     return {k for k in data if isinstance(k, str)}
 
 
