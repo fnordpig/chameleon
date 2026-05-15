@@ -78,6 +78,34 @@ def test_cli_merge_latest_ambiguity_is_concise_error(
     )
 
 
+def test_cli_merge_reports_invalid_neutral_yaml_concisely(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    marker = "<" * 7
+    neutral = tmp_path / "config" / "chameleon" / "neutral.yaml"
+    neutral.parent.mkdir(parents=True)
+    neutral.write_text(
+        f"schema_version: 1\n{marker} HEAD\nidentity: {{}}\n",
+        encoding="utf-8",
+    )
+
+    rc = cli.main(["merge", "--quiet", "--no-warn", "--on-conflict=keep"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert "error: invalid YAML in " in captured.err
+    assert str(neutral) in captured.err
+    assert "line 2" in captured.err
+    assert "raw git conflict marker" in captured.err
+
+
 def test_cli_init_dry_run_is_side_effect_free(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

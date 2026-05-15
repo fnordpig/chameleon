@@ -20,7 +20,7 @@ from rich.prompt import Confirm
 from chameleon import __version__
 from chameleon._types import FileOwnership, TargetId
 from chameleon.codecs._protocol import TranspileCtx
-from chameleon.io.yaml import dump_yaml, load_yaml
+from chameleon.io.yaml import YamlLoadError, dump_yaml, load_yaml
 from chameleon.merge.changeset import walk_changes
 from chameleon.merge.drift import unified_diff
 from chameleon.merge.engine import MergeEngine, MergeRequest, MergeResult
@@ -345,6 +345,9 @@ def _cmd_validate(args: argparse.Namespace) -> int:
         return 1
     try:
         Neutral.model_validate(load_yaml(paths.neutral))
+    except YamlLoadError as e:
+        sys.stderr.write(f"error: {e}\n")
+        return 1
     except Exception as e:
         sys.stderr.write(f"validation failed: {e}\n")
         return 1
@@ -813,7 +816,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if handler is None:
         parser.print_help()
         return 1
-    return handler(args)
+    try:
+        return handler(args)
+    except YamlLoadError as e:
+        sys.stderr.write(f"error: {e}\n")
+        return 1
 
 
 if __name__ == "__main__":
